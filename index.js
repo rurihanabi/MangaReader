@@ -2,10 +2,13 @@ import '~/utils/define';
 import { AppRegistry, LogBox } from 'react-native';
 import { CacheManager } from '@georstat/react-native-image-cache';
 import { Dirs } from 'react-native-file-access';
-import { proxy } from './package.json';
 import { name } from './app.json';
-import { env } from '~/utils';
+import * as packageJson from './package.json';
 import App from '~/App';
+
+process.env.NAME = name;
+process.env.VERSION = 'v' + packageJson.version;
+process.env.PUBLISH_TIME = packageJson.publishTime;
 
 CacheManager.config = {
   baseDir: `${Dirs.CacheDir}/images_cache/`,
@@ -13,10 +16,6 @@ CacheManager.config = {
   sourceAnimationDuration: 300,
   thumbnailAnimationDuration: 300,
 };
-
-if (process.env.NODE_ENV === env.DEV) {
-  process.env.PROXY = proxy;
-}
 
 LogBox.ignoreLogs(['Require cycle:', 'Remote debugger']);
 AppRegistry.registerComponent(name, () => App);

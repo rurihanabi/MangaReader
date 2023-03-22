@@ -6,8 +6,9 @@
 一个漫画 APP📱，基于 react-native 构建，兼容 Android、Ios 平台
 
 - 插件式设计
-- 收藏、搜索、批量更新
+- 收藏、搜索、批量更新、下载、预加载
 - 图片手势控制、本地缓存
+- 收藏备份和恢复
 
 <p align="center">
   <img src="./demo.gif" alt="demo" />
@@ -27,36 +28,26 @@
 
 Android：[下载](https://github.com/youniaogu/MangaReader/releases)
 
-Ios：因为没有开发者账户，请按上面流程安装依赖并构建至手机
+Ios：[未签名 ipa](https://github.com/youniaogu/MangaReader/releases)
 
-## TodoList
+## NHentai
 
-- [x] 更多的插件
+nhentai 开启了 cloudflare 的 ddos 保护，在使用此插件前，请遵循下面流程在 webview 里通过 cloudflare 校验并获得 cookie
 
-  - [x] ~~[manhuagui](https://www.mhgui.com/)（大陆版，目前网站 403，无法访问）~~
+<img title="step1" src="./step1.png" alt="step1" width="200">
 
-  - [x] [manhuaguimobile](https://m.manhuagui.com/)（主站，访问需要代理）
+<img title="step2" src="./step2.png" alt="step2" width="200">
 
-  - [x] [copymanga](https://www.copymanga.org/)
+<img title="step3" src="./step3.jpg" alt="step3" width="200">
 
-  - [x] [manhuadb](https://www.manhuadb.com/)
+## About
 
-  - [x] [jmcomic](https://18comic.vip)（屏蔽日本 ip）
+很喜欢看漫画，能在一个 APP 里看完所有的漫画，是我一直以来的想法
 
-  - [x] [dongmanzhijia](https://m.dmzj.com/)
+这个项目是在工作之余开发的，时间有限，如果遇到问题，欢迎 Issues
 
-  - [x] [manhuamao](https://www.maofly.com/)
+最后感谢 Star，你的 Star 是我更新的动力
 
-- [ ] 漫画更新提示
+## License
 
-- [x] 漫画批量更新
-
-- [x] 发现页支持分类搜索
-
-- [ ] 章节预加载
-
-- [ ] 夜间模式
-
-- [x] 插件配置页
-
-- [x] 竖屏模式
+[MIT](https://github.com/youniaogu/MangaReader/blob/master/LICENSE)

@@ -1,4 +1,12 @@
-import { AsyncStatus, MangaStatus, ReaderMode, customTheme } from '~/utils';
+import {
+  Sequence,
+  AsyncStatus,
+  MangaStatus,
+  ReaderMode,
+  ReaderDirection,
+  customTheme,
+  env,
+} from '~/utils';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { PayloadAction } from '@reduxjs/toolkit';
 import { Plugin } from '~/plugins';
@@ -19,15 +27,26 @@ declare global {
           | { error: Error; data?: undefined; taskId?: string }
           | { error?: undefined; data: T; taskId?: string }
   >;
-  type ActionParameters<T = Function> = PayloadAction<Parameters<T>[0]>;
+  type PartialOption<T, K extends string | number | symbol> = Omit<T, K> & {
+    [A in Extract<keyof T, K>]?: T[A];
+  };
+
+  type BackupData = {
+    createTime: number;
+    favorites: string[];
+  };
+
+  type OptionItem = { label: string; value: string };
 
   type RootStackParamList = {
     Home: undefined;
     Discovery: undefined;
-    Search: { keyword: string };
+    Search: { keyword: string; source: Plugin };
     Detail: { mangaHash: string };
     Chapter: { mangaHash: string; chapterHash: string; page: number };
     Plugin: undefined;
+    Scan: undefined;
+    Webview: { uri: string; userAgent?: string };
     About: undefined;
   };
   type StackHomeProps = NativeStackScreenProps<RootStackParamList, 'Home'>;
@@ -36,6 +55,8 @@ declare global {
   type StackDetailProps = NativeStackScreenProps<RootStackParamList, 'Detail'>;
   type StackChapterProps = NativeStackScreenProps<RootStackParamList, 'Chapter'>;
   type StackPluginProps = NativeStackScreenProps<RootStackParamList, 'Plugin'>;
+  type StackScanProps = NativeStackScreenProps<RootStackParamList, 'Scan'>;
+  type StackWebviewProps = NativeStackScreenProps<RootStackParamList, 'Webview'>;
   type StackAboutProps = NativeStackScreenProps<RootStackParamList, 'About'>;
 
   declare interface Manga {
@@ -45,6 +66,7 @@ declare global {
     sourceName: string;
     mangaId: string;
     cover: string;
+    headers?: Record<string, string>;
     title: string;
     latest: string;
     updateTime: string;
@@ -54,7 +76,21 @@ declare global {
     chapters: ChapterItem[];
     lastWatchChapter?: string;
     lastWatchPage?: number;
+    history: Record<
+      string,
+      {
+        total: number;
+        progress: number;
+        imagesLoaded: number[];
+        isVisited: boolean;
+      }
+    >;
   }
+  declare interface IncreaseManga
+    extends PartialOption<
+      Manga,
+      'latest' | 'updateTime' | 'author' | 'tag' | 'status' | 'chapters' | 'history'
+    > {}
   declare interface ChapterItem {
     hash: string;
     mangaId: string;
@@ -68,21 +104,50 @@ declare global {
     chapterId: string;
     name: string;
     title: string;
-    headers: {
-      [index: string]: string;
-    };
+    headers?: Record<string, string>;
     images: { uri: string; needUnscramble?: boolean }[];
+  }
+  declare interface Release {
+    loadStatus: AsyncStatus;
+    name: string;
+    version: string;
+    publishTime: string;
+    latest?: LatestRelease;
+  }
+  declare interface LatestRelease {
+    url: string;
+    version: string;
+    changeLog: string;
+    publishTime: string;
+    file?: {
+      apk: {
+        size: number;
+        downloadUrl: string;
+      };
+      ipa: {
+        size: number;
+        downloadUrl: string;
+      };
+    };
   }
 
   declare interface RootState {
     app: {
       launchStatus: AsyncStatus;
+      message: string[];
+    };
+    datasync: {
       syncStatus: AsyncStatus;
       clearStatus: AsyncStatus;
-      errorMessage: string[];
+      backupStatus: AsyncStatus;
+      restoreStatus: AsyncStatus;
     };
+    release: Release;
     setting: {
-      readerMode: ReaderMode;
+      mode: ReaderMode;
+      direction: ReaderDirection;
+      sequence: Sequence;
+      firstPrehandle: boolean;
     };
     plugin: {
       source: Plugin;
@@ -91,28 +156,30 @@ declare global {
         label: string;
         value: Plugin;
         score: number;
+        href: string;
+        userAgent?: string;
         description: string;
         disabled: boolean;
       }[];
     };
     batch: {
       loadStatus: AsyncStatus;
+      stack: string[];
       queue: string[];
       success: string[];
       fail: string[];
     };
-    favorites: { mangaHash: string; isTrend: boolean }[];
+    favorites: { mangaHash: string; isTrend: boolean; inQueue: boolean }[];
     search: {
+      filter: Record<string, string>;
+      keyword: string;
       page: number;
       isEnd: boolean;
       loadStatus: AsyncStatus;
       list: string[];
     };
     discovery: {
-      type: string;
-      region: string;
-      status: string;
-      sort: string;
+      filter: Record<string, string>;
       page: number;
       isEnd: boolean;
       loadStatus: AsyncStatus;
@@ -123,18 +190,30 @@ declare global {
     };
     chapter: {
       loadStatus: AsyncStatus;
+      openDrawer: boolean;
+      showDrawer: boolean;
+      prehandleLog: {
+        id: string;
+        text: string;
+        status: AsyncStatus;
+      }[];
     };
     dict: {
-      manga: {
-        [key: string]: Manga | undefined;
-      };
-      chapter: {
-        [key: string]: Chapter | undefined;
-      };
+      manga: Record<string, Manga | undefined>;
+      chapter: Record<string, Chapter | undefined>;
     };
   }
 
   interface String {
     splic(f: string): string[];
+  }
+
+  namespace NodeJS {
+    interface ProcessEnv {
+      NODE_ENV: env;
+      NAME: string;
+      VERSION: string;
+      PUBLISH_TIME: string;
+    }
   }
 }

@@ -1,16 +1,29 @@
+import { AsyncStatus, MangaStatus, ReaderMode, ReaderDirection, Sequence } from '~/utils';
 import { createSlice, combineReducers, PayloadAction } from '@reduxjs/toolkit';
-import { Plugin, Options, defaultPlugin, defaultPluginList } from '~/plugins';
-import { AsyncStatus, ReaderMode } from '~/utils';
+import { Plugin, defaultPlugin, defaultPluginList } from '~/plugins';
 
 export const initialState: RootState = {
   app: {
     launchStatus: AsyncStatus.Default,
+    message: [],
+  },
+  datasync: {
     syncStatus: AsyncStatus.Default,
     clearStatus: AsyncStatus.Default,
-    errorMessage: [],
+    backupStatus: AsyncStatus.Default,
+    restoreStatus: AsyncStatus.Default,
+  },
+  release: {
+    loadStatus: AsyncStatus.Default,
+    name: process.env.NAME,
+    version: process.env.VERSION,
+    publishTime: process.env.PUBLISH_TIME,
   },
   setting: {
-    readerMode: ReaderMode.Horizontal,
+    mode: ReaderMode.Horizontal,
+    direction: ReaderDirection.Right,
+    sequence: Sequence.Desc,
+    firstPrehandle: true,
   },
   plugin: {
     source: defaultPlugin,
@@ -18,16 +31,21 @@ export const initialState: RootState = {
   },
   batch: {
     loadStatus: AsyncStatus.Default,
+    stack: [],
     queue: [],
     success: [],
     fail: [],
   },
-  search: { page: 1, isEnd: false, loadStatus: AsyncStatus.Default, list: [] },
+  search: {
+    filter: {},
+    keyword: '',
+    page: 1,
+    isEnd: false,
+    loadStatus: AsyncStatus.Default,
+    list: [],
+  },
   discovery: {
-    type: Options.Default,
-    region: Options.Default,
-    status: Options.Default,
-    sort: Options.Default,
+    filter: {},
     page: 1,
     isEnd: false,
     loadStatus: AsyncStatus.Default,
@@ -39,11 +57,23 @@ export const initialState: RootState = {
   },
   chapter: {
     loadStatus: AsyncStatus.Default,
+    openDrawer: false,
+    showDrawer: false,
+    prehandleLog: [],
   },
   dict: {
     manga: {},
     chapter: {},
   },
+};
+const defaultIncreaseManga = {
+  latest: '',
+  updateTime: '',
+  author: [],
+  tag: [],
+  status: MangaStatus.Unknown,
+  chapters: [],
+  history: {},
 };
 
 const appSlice = createSlice({
@@ -60,6 +90,22 @@ const appSlice = createSlice({
       }
       state.launchStatus = AsyncStatus.Fulfilled;
     },
+    toastMessage(state, action: PayloadAction<string>) {
+      state.message.unshift(action.payload);
+    },
+    catchError(state, action: PayloadAction<string>) {
+      state.message.unshift(action.payload);
+    },
+    throwMessage(state) {
+      state.message = [];
+    },
+  },
+});
+
+const datasyncSlice = createSlice({
+  name: 'datasync',
+  initialState: initialState.datasync,
+  reducers: {
     syncData(state) {
       state.syncStatus = AsyncStatus.Pending;
     },
@@ -69,6 +115,26 @@ const appSlice = createSlice({
         return;
       }
       state.syncStatus = AsyncStatus.Fulfilled;
+    },
+    backupToClipboard(state) {
+      state.backupStatus = AsyncStatus.Pending;
+    },
+    backupToClipboardCompletion(state, action: FetchResponseAction) {
+      if (action.payload.error) {
+        state.syncStatus = AsyncStatus.Rejected;
+        return;
+      }
+      state.syncStatus = AsyncStatus.Fulfilled;
+    },
+    restore(state, _action: PayloadAction<string>) {
+      state.restoreStatus = AsyncStatus.Pending;
+    },
+    restoreCompletion(state, action: FetchResponseAction) {
+      if (action.payload.error) {
+        state.restoreStatus = AsyncStatus.Rejected;
+        return;
+      }
+      state.restoreStatus = AsyncStatus.Fulfilled;
     },
     clearCache(state) {
       state.clearStatus = AsyncStatus.Pending;
@@ -80,11 +146,27 @@ const appSlice = createSlice({
       }
       state.clearStatus = AsyncStatus.Fulfilled;
     },
-    catchError(state, action: PayloadAction<string>) {
-      state.errorMessage.unshift(action.payload);
+  },
+});
+
+const releaseSlice = createSlice({
+  name: 'release',
+  initialState: initialState.release,
+  reducers: {
+    loadLatestRelease(state) {
+      state.loadStatus = AsyncStatus.Pending;
+      state.latest = undefined;
     },
-    throwError(state) {
-      state.errorMessage = [];
+    loadLatestReleaseCompletion(state, action: FetchResponseAction<LatestRelease>) {
+      const { error, data } = action.payload;
+
+      if (error) {
+        state.loadStatus = AsyncStatus.Rejected;
+        return;
+      }
+
+      state.loadStatus = AsyncStatus.Fulfilled;
+      state.latest = data;
     },
   },
 });
@@ -93,12 +175,27 @@ const settingSlice = createSlice({
   name: 'setting',
   initialState: initialState.setting,
   reducers: {
-    setReaderMode(state, action: PayloadAction<ReaderMode>) {
-      state.readerMode = action.payload;
+    setMode(state, action: PayloadAction<ReaderMode>) {
+      state.mode = action.payload;
+    },
+    setDirection(state, action: PayloadAction<ReaderDirection>) {
+      state.direction = action.payload;
+    },
+    setSequence(state, action: PayloadAction<Sequence>) {
+      state.sequence = action.payload;
     },
     syncSetting(_state, action: PayloadAction<RootState['setting']>) {
       return action.payload;
     },
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(datasyncAction.clearCache, () => {
+        return initialState.setting;
+      })
+      .addCase(chapterAction.addPrehandleLog, (state) => {
+        state.firstPrehandle = false;
+      });
   },
 });
 
@@ -120,13 +217,18 @@ const pluginSlice = createSlice({
       return action.payload;
     },
   },
+  extraReducers: (builder) => {
+    builder.addCase(datasyncAction.clearCache, () => {
+      return initialState.plugin;
+    });
+  },
 });
 
 const batchSlice = createSlice({
   name: 'batch',
   initialState: initialState.batch,
   reducers: {
-    batchUpdate() {},
+    batchUpdate(_state, _action: PayloadAction<string[] | undefined>) {},
     startBatchUpdate(state, action: PayloadAction<string[]>) {
       state.loadStatus = AsyncStatus.Pending;
       state.queue = action.payload;
@@ -136,16 +238,25 @@ const batchSlice = createSlice({
     endBatchUpdate(state) {
       state.loadStatus = AsyncStatus.Fulfilled;
     },
-    batchRecord(
+    inStack(state, action: PayloadAction<string>) {
+      state.stack.push(action.payload);
+      state.queue = state.queue.filter((item) => item !== action.payload);
+    },
+    outStack(
       state,
-      action: PayloadAction<{ isSuccess: boolean; isTrend: boolean; hash: string }>
+      action: PayloadAction<{
+        isSuccess: boolean;
+        isTrend: boolean;
+        hash: string;
+        isRetry: boolean;
+      }>
     ) {
-      const { isSuccess, hash } = action.payload;
-      state.queue = state.queue.filter((item) => item !== hash);
+      const { isSuccess, hash, isRetry } = action.payload;
+      state.stack = state.stack.filter((item) => item !== hash);
       if (isSuccess) {
         state.success.push(hash);
       } else {
-        state.fail.push(hash);
+        isRetry ? state.queue.push(hash) : state.fail.push(hash);
       }
     },
     cancelLoadManga() {},
@@ -156,20 +267,30 @@ const searchSlice = createSlice({
   name: 'search',
   initialState: initialState.search,
   reducers: {
+    setSearchFilter(state, action: PayloadAction<Record<string, string>>) {
+      state.filter = {
+        ...state.filter,
+        ...action.payload,
+      };
+    },
+    resetSearchFilter(state) {
+      state.filter = {};
+    },
     loadSearch(
       state,
       action: PayloadAction<{ keyword: string; isReset?: boolean; source: Plugin }>
     ) {
-      const { isReset = false } = action.payload;
+      const { keyword, isReset = false } = action.payload;
       if (isReset) {
         state.page = 1;
         state.list = [];
         state.isEnd = false;
       }
 
+      state.keyword = keyword;
       state.loadStatus = AsyncStatus.Pending;
     },
-    loadSearchCompletion(state, action: FetchResponseAction<Manga[]>) {
+    loadSearchCompletion(state, action: FetchResponseAction<IncreaseManga[]>) {
       const { error, data = [] } = action.payload;
       if (error) {
         state.loadStatus = AsyncStatus.Rejected;
@@ -189,17 +310,11 @@ const discoverySlice = createSlice({
   name: 'discovery',
   initialState: initialState.discovery,
   reducers: {
-    setType(state, action: PayloadAction<string>) {
-      state.type = action.payload;
-    },
-    setRegion(state, action: PayloadAction<string>) {
-      state.region = action.payload;
-    },
-    setStatus(state, action: PayloadAction<string>) {
-      state.status = action.payload;
-    },
-    setSort(state, action: PayloadAction<string>) {
-      state.sort = action.payload;
+    setDiscoveryFilter(state, action: PayloadAction<Record<string, string>>) {
+      state.filter = {
+        ...state.filter,
+        ...action.payload,
+      };
     },
     loadDiscovery(state, action: PayloadAction<{ isReset?: boolean; source: Plugin }>) {
       const isReset = action.payload.isReset || false;
@@ -211,7 +326,7 @@ const discoverySlice = createSlice({
 
       state.loadStatus = AsyncStatus.Pending;
     },
-    loadDiscoveryCompletion(state, action: FetchResponseAction<Manga[]>) {
+    loadDiscoveryCompletion(state, action: FetchResponseAction<IncreaseManga[]>) {
       const { error, data = [] } = action.payload;
       if (error) {
         state.loadStatus = AsyncStatus.Rejected;
@@ -225,14 +340,11 @@ const discoverySlice = createSlice({
       state.list = list;
     },
   },
-  extraReducers: {
-    [pluginSlice.actions.setSource.type]: (state) => {
+  extraReducers: (builder) => {
+    builder.addCase(pluginAction.setSource, (state) => {
+      state.filter = {};
       state.loadStatus = AsyncStatus.Default;
-      state.type = Options.Default;
-      state.region = Options.Default;
-      state.status = Options.Default;
-      state.sort = Options.Default;
-    },
+    });
   },
 });
 
@@ -241,32 +353,61 @@ const favoritesSlice = createSlice({
   initialState: initialState.favorites,
   reducers: {
     addFavorites(state, action: PayloadAction<string>) {
-      state.unshift({ mangaHash: action.payload, isTrend: false });
+      state.unshift({ mangaHash: action.payload, isTrend: false, inQueue: true });
     },
     removeFavorites(state, action: PayloadAction<string>) {
       return state.filter((item) => item.mangaHash !== action.payload);
     },
+    pushQueque(state, action: PayloadAction<string>) {
+      return state.map((item) => {
+        if (item.mangaHash === action.payload) {
+          return {
+            ...item,
+            inQueue: true,
+          };
+        }
+        return item;
+      });
+    },
+    popQueue(state, action: PayloadAction<string>) {
+      return state.map((item) => {
+        if (item.mangaHash === action.payload) {
+          return {
+            ...item,
+            inQueue: false,
+          };
+        }
+        return item;
+      });
+    },
     viewFavorites(state, action: PayloadAction<string>) {
-      const stateAfterFiltered = state.filter((item) => item.mangaHash !== action.payload);
-      stateAfterFiltered.unshift({ mangaHash: action.payload, isTrend: false });
-      return stateAfterFiltered;
+      return state.reduce<RootState['favorites']>((dict, item) => {
+        if (item.mangaHash === action.payload) {
+          return [{ ...item, isTrend: false }, ...dict];
+        }
+        return [...dict, item];
+      }, []);
     },
     syncFavorites(_state, action: PayloadAction<RootState['favorites']>) {
       return action.payload;
     },
   },
-  extraReducers: {
-    [batchSlice.actions.batchRecord.type]: (
-      state,
-      action: PayloadAction<{ isSuccess: boolean; isTrend: boolean; hash: string }>
-    ) => {
-      const { isSuccess, isTrend, hash } = action.payload;
-      if (isSuccess && isTrend) {
-        const stateAfterFiltered = state.filter((item) => item.mangaHash !== hash);
-        stateAfterFiltered.unshift({ mangaHash: hash, isTrend: true });
-        return stateAfterFiltered;
-      }
-    },
+  extraReducers: (builder) => {
+    builder
+      .addCase(batchAction.outStack, (state, action) => {
+        const { isSuccess, isTrend, hash } = action.payload;
+        if (isSuccess && isTrend) {
+          return state.reduce<RootState['favorites']>((dict, item) => {
+            if (item.mangaHash === hash) {
+              return [{ ...item, isTrend: true }, ...dict];
+            }
+            return [...dict, item];
+          }, []);
+        }
+      })
+      .addCase(datasyncAction.clearCache, () => {
+        return initialState.favorites;
+      });
   },
 });
 
@@ -277,7 +418,7 @@ const mangaSlice = createSlice({
     loadManga(state, _action: PayloadAction<{ mangaHash: string; taskId?: string }>) {
       state.loadStatus = AsyncStatus.Pending;
     },
-    loadMangaCompletion(state, action: FetchResponseAction<Manga>) {
+    loadMangaCompletion(state, action: FetchResponseAction<IncreaseManga>) {
       const { error } = action.payload;
       if (error) {
         state.loadStatus = AsyncStatus.Rejected;
@@ -287,15 +428,11 @@ const mangaSlice = createSlice({
       state.loadStatus = AsyncStatus.Fulfilled;
     },
     loadMangaInfo(_state, _action: PayloadAction<{ mangaHash: string }>) {},
-    loadMangaInfoCompletion(_state, _action: FetchResponseAction<Manga>) {},
+    loadMangaInfoCompletion(_state, _action: FetchResponseAction<IncreaseManga>) {},
     loadChapterList(_state, _action: PayloadAction<{ mangaHash: string; page: number }>) {},
     loadChapterListCompletion(
       _state,
-      _action: FetchResponseAction<{
-        mangaHash: string;
-        page: number;
-        list: Manga['chapters'];
-      }>
+      _action: FetchResponseAction<{ mangaHash: string; page: number; list: Manga['chapters'] }>
     ) {},
   },
 });
@@ -315,6 +452,40 @@ const chapterSlice = createSlice({
       }
 
       state.loadStatus = AsyncStatus.Fulfilled;
+    },
+    prehandleChapter(
+      _state,
+      _action: PayloadAction<{ mangaHash: string; chapterHash: string; save?: boolean }>
+    ) {},
+    prehandleChapterCompletion(_state, _action: FetchResponseAction) {},
+    setPrehandleLogStatus(state, action: PayloadAction<boolean>) {
+      state.openDrawer = action.payload && state.showDrawer;
+    },
+    setPrehandleLogVisible(state, action: PayloadAction<boolean>) {
+      state.showDrawer = action.payload;
+    },
+    addPrehandleLog(
+      state,
+      action: PayloadAction<{ id: string; text: string; status: AsyncStatus }[]>
+    ) {
+      state.prehandleLog = action.payload.concat(state.prehandleLog);
+    },
+    updatePrehandleLog(
+      state,
+      action: PayloadAction<{ id: string; text: string; status: AsyncStatus }>
+    ) {
+      state.prehandleLog = state.prehandleLog
+        .map((item) => {
+          if (item.id !== action.payload.id) {
+            return item;
+          }
+
+          return {
+            ...item,
+            ...action.payload,
+          };
+        })
+        .filter((item) => item.status !== AsyncStatus.Fulfilled);
     },
   },
 });
@@ -342,66 +513,105 @@ const dictSlice = createSlice({
         manga.lastWatchPage = page;
       }
     },
-  },
-  extraReducers: {
-    [searchSlice.actions.loadSearchCompletion.type]: (
+    viewImage(
       state,
-      action: FetchResponseAction<Manga[]>
-    ) => {
-      const { error, data } = action.payload;
-      if (error) {
-        return;
-      }
+      action: PayloadAction<{
+        mangaHash: string;
+        chapterHash: string;
+        index: number;
+        isPrefetch?: boolean;
+      }>
+    ) {
+      const { mangaHash, chapterHash, index, isPrefetch = false } = action.payload;
+      const manga = state.manga[mangaHash];
+      const chapter = state.chapter[chapterHash];
 
-      data.forEach((item) => {
-        state.manga[item.hash] = { ...state.manga[item.hash], ...item };
-      });
-    },
-    [discoverySlice.actions.loadDiscoveryCompletion.type]: (
-      state,
-      action: FetchResponseAction<Manga[]>
-    ) => {
-      const { error, data } = action.payload;
-      if (error) {
-        return;
-      }
+      if (manga && chapter) {
+        if (!manga.history[chapterHash]) {
+          manga.history[chapterHash] = {
+            total: 0,
+            progress: 0,
+            imagesLoaded: [],
+            isVisited: false,
+          };
+        }
 
-      data.forEach((item) => {
-        state.manga[item.hash] = {
-          ...state.manga[item.hash],
-          ...item,
-          chapters:
-            item.chapters.length > 0 ? item.chapters : state.manga[item.hash]?.chapters || [],
+        const imagesLoaded = Array.from(
+          new Set([...manga.history[chapterHash].imagesLoaded, index])
+        );
+
+        manga.history[chapterHash] = {
+          ...manga.history[chapterHash],
+          total: chapter.images.length,
+          progress: Math.max(
+            manga.history[chapterHash].progress,
+            Math.floor((imagesLoaded.length * 100) / chapter.images.length)
+          ),
+          imagesLoaded,
+          isVisited: !isPrefetch ? true : manga.history[chapterHash].isVisited,
         };
+      }
+    },
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(searchAction.loadSearchCompletion, (state, action) => {
+        const { error, data } = action.payload;
+        if (error) {
+          return;
+        }
+
+        data.forEach((item) => {
+          state.manga[item.hash] = {
+            ...defaultIncreaseManga,
+            ...state.manga[item.hash],
+            ...item,
+          };
+        });
+      })
+      .addCase(discoveryAction.loadDiscoveryCompletion, (state, action) => {
+        const { error, data } = action.payload;
+        if (error) {
+          return;
+        }
+
+        data.forEach((item) => {
+          state.manga[item.hash] = {
+            ...defaultIncreaseManga,
+            ...state.manga[item.hash],
+            ...item,
+          };
+        });
+      })
+      .addCase(mangaAction.loadMangaCompletion, (state, action) => {
+        const { error, data } = action.payload;
+        if (error) {
+          return;
+        }
+
+        state.manga[data.hash] = {
+          ...defaultIncreaseManga,
+          ...state.manga[data.hash],
+          ...data,
+        };
+      })
+      .addCase(chapterAction.loadChapterCompletion, (state, action) => {
+        const { error, data } = action.payload;
+        if (error) {
+          return;
+        }
+
+        state.chapter[data.hash] = { ...state.chapter[data.hash], ...data };
+      })
+      .addCase(datasyncAction.clearCache, () => {
+        return initialState.dict;
       });
-    },
-    [mangaSlice.actions.loadMangaCompletion.type]: (state, action: FetchResponseAction<Manga>) => {
-      const { error, data } = action.payload;
-      if (error) {
-        return;
-      }
-
-      state.manga[data.hash] = {
-        ...state.manga[data.hash],
-        ...data,
-        chapters: data.chapters.length > 0 ? data.chapters : state.manga[data.hash]?.chapters || [],
-      };
-    },
-    [chapterSlice.actions.loadChapterCompletion.type]: (
-      state,
-      action: FetchResponseAction<Chapter>
-    ) => {
-      const { error, data } = action.payload;
-      if (error) {
-        return;
-      }
-
-      state.chapter[data.hash] = { ...state.chapter[data.hash], ...data };
-    },
   },
 });
 
 const appAction = appSlice.actions;
+const datasyncAction = datasyncSlice.actions;
+const releaseAction = releaseSlice.actions;
 const settingAction = settingSlice.actions;
 const pluginAction = pluginSlice.actions;
 const batchAction = batchSlice.actions;
@@ -413,6 +623,8 @@ const chapterAction = chapterSlice.actions;
 const dictAction = dictSlice.actions;
 
 const appReducer = appSlice.reducer;
+const datasyncReducer = datasyncSlice.reducer;
+const releaseReducer = releaseSlice.reducer;
 const settingReducer = settingSlice.reducer;
 const pluginReducer = pluginSlice.reducer;
 const batchReducer = batchSlice.reducer;
@@ -425,6 +637,8 @@ const dictReducer = dictSlice.reducer;
 
 export const action = {
   ...appAction,
+  ...datasyncAction,
+  ...releaseAction,
   ...settingAction,
   ...pluginAction,
   ...batchAction,
@@ -437,6 +651,8 @@ export const action = {
 };
 export const reducer = combineReducers<RootState>({
   app: appReducer,
+  datasync: datasyncReducer,
+  release: releaseReducer,
   setting: settingReducer,
   plugin: pluginReducer,
   batch: batchReducer,

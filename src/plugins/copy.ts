@@ -1,5 +1,7 @@
 import Base, { Plugin, Options } from './base';
-import { MangaStatus } from '~/utils';
+import { MangaStatus, ErrorMessage } from '~/utils';
+import { AESDecrypt } from '~/utils';
+import * as cheerio from 'cheerio';
 
 interface BaseResponse<T> {
   code: number;
@@ -49,146 +51,136 @@ interface ChapterListResponse
     offset: number;
     list: { uuid: string; name: string; comic_path_word: string }[];
   }> {}
-interface ChapterResponse
-  extends BaseResponse<{
-    comic: {
-      name: string;
-      path_word: string;
-    };
-    chapter: {
-      name: string;
-      uuid: string;
-      contents: { url: string }[];
-      words: number[];
-    };
-  }> {}
 
-const options = {
-  type: [
-    { label: '选择分类', value: Options.Default },
-    { label: '愛情', value: 'aiqing' },
-    { label: '歡樂向', value: 'huanlexiang' },
-    { label: '冒险', value: 'maoxian' },
-    { label: '奇幻', value: 'qihuan' },
-    { label: '百合', value: 'baihe' },
-    { label: '校园', value: 'xiaoyuan' },
-    { label: '科幻', value: 'kehuan' },
-    { label: '東方', value: 'dongfang' },
-    { label: '生活', value: 'shenghuo' },
-    { label: '轻小说', value: 'qingxiaoshuo' },
-    { label: '格鬥', value: 'gedou' },
-    { label: '耽美', value: 'danmei' },
-    { label: '悬疑', value: 'xuanyi' },
-    { label: '神鬼', value: 'shengui' },
-    { label: '其他', value: 'qita' },
-    { label: '职场', value: 'zhichang' },
-    { label: '萌系', value: 'mengxi' },
-    { label: '治愈', value: 'zhiyu' },
-    { label: '長條', value: 'changtiao' },
-    { label: '四格', value: 'sige' },
-    { label: '舰娘', value: 'jianniang' },
-    { label: '节操', value: 'jiecao' },
-    { label: 'TL', value: 'teenslove' },
-    { label: '竞技', value: 'jingji' },
-    { label: '搞笑', value: 'gaoxiao' },
-    { label: '伪娘', value: 'weiniang' },
-    { label: '热血', value: 'rexue' },
-    { label: '後宮', value: 'hougong' },
-    { label: '美食', value: 'meishi' },
-    { label: '性转换', value: 'xingzhuanhuan' },
-    { label: '侦探', value: 'zhentan' },
-    { label: '励志', value: 'lizhi' },
-    { label: 'AA', value: 'aa' },
-    { label: '彩色', value: 'COLOR' },
-    { label: '音乐舞蹈', value: 'yinyuewudao' },
-    { label: '异世界', value: 'yishijie' },
-    { label: '战争', value: 'zhanzheng' },
-    { label: '历史', value: 'lishi' },
-    { label: '机战', value: 'jizhan' },
-    { label: '惊悚', value: 'jingsong' },
-    { label: 'C99', value: 'comiket99' },
-    { label: '恐怖', value: '恐怖' },
-    { label: '都市', value: 'dushi' },
-    { label: 'C97', value: 'comiket97' },
-    { label: '穿越', value: 'chuanyue' },
-    { label: 'C96', value: 'comiket96' },
-    { label: '重生', value: 'chongsheng' },
-    { label: '魔幻', value: 'mohuan' },
-    { label: '宅系', value: 'zhaixi' },
-    { label: '武侠', value: 'wuxia' },
-    { label: 'C98', value: 'C98' },
-    { label: '生存', value: 'shengcun' },
-    { label: 'C95', value: 'comiket95' },
-    { label: 'FATE', value: 'fate' },
-    { label: '無修正', value: 'Uncensored' },
-    { label: '转生', value: 'zhuansheng' },
-    { label: 'LoveLive', value: 'loveLive' },
-    { label: '男同', value: 'nantong' },
-    { label: '仙侠', value: 'xianxia' },
-    { label: '玄幻', value: 'xuanhuan' },
-    { label: '真人', value: 'zhenren' },
-  ],
-  region: [
-    { label: '选择地区', value: Options.Default },
-    { label: '日本', value: 'japan' },
-    { label: '韩国', value: 'korea' },
-    { label: '欧美', value: 'west' },
-    { label: '完结', value: 'finish' },
-  ],
-  status: [{ label: '选择状态', value: Options.Default }],
-  sort: [
-    { label: '更新时间⬇️', value: Options.Default },
-    { label: '更新时间⬆️', value: 'datetime_updated' },
-    { label: '热度⬇️', value: '-popular' },
-    { label: '热度⬆️', value: 'popular' },
-  ],
-};
+const discoveryOptions = [
+  {
+    name: 'type',
+    options: [
+      { label: '选择分类', value: Options.Default },
+      { label: '愛情', value: 'aiqing' },
+      { label: '歡樂向', value: 'huanlexiang' },
+      { label: '冒险', value: 'maoxian' },
+      { label: '奇幻', value: 'qihuan' },
+      { label: '百合', value: 'baihe' },
+      { label: '校园', value: 'xiaoyuan' },
+      { label: '科幻', value: 'kehuan' },
+      { label: '東方', value: 'dongfang' },
+      { label: '生活', value: 'shenghuo' },
+      { label: '轻小说', value: 'qingxiaoshuo' },
+      { label: '格鬥', value: 'gedou' },
+      { label: '耽美', value: 'danmei' },
+      { label: '悬疑', value: 'xuanyi' },
+      { label: '神鬼', value: 'shengui' },
+      { label: '其他', value: 'qita' },
+      { label: '职场', value: 'zhichang' },
+      { label: '萌系', value: 'mengxi' },
+      { label: '治愈', value: 'zhiyu' },
+      { label: '長條', value: 'changtiao' },
+      { label: '四格', value: 'sige' },
+      { label: '舰娘', value: 'jianniang' },
+      { label: '节操', value: 'jiecao' },
+      { label: 'TL', value: 'teenslove' },
+      { label: '竞技', value: 'jingji' },
+      { label: '搞笑', value: 'gaoxiao' },
+      { label: '伪娘', value: 'weiniang' },
+      { label: '热血', value: 'rexue' },
+      { label: '後宮', value: 'hougong' },
+      { label: '美食', value: 'meishi' },
+      { label: '性转换', value: 'xingzhuanhuan' },
+      { label: '侦探', value: 'zhentan' },
+      { label: '励志', value: 'lizhi' },
+      { label: 'AA', value: 'aa' },
+      { label: '彩色', value: 'COLOR' },
+      { label: '音乐舞蹈', value: 'yinyuewudao' },
+      { label: '异世界', value: 'yishijie' },
+      { label: '战争', value: 'zhanzheng' },
+      { label: '历史', value: 'lishi' },
+      { label: '机战', value: 'jizhan' },
+      { label: '惊悚', value: 'jingsong' },
+      { label: 'C99', value: 'comiket99' },
+      { label: '恐怖', value: '恐怖' },
+      { label: '都市', value: 'dushi' },
+      { label: 'C97', value: 'comiket97' },
+      { label: '穿越', value: 'chuanyue' },
+      { label: 'C96', value: 'comiket96' },
+      { label: '重生', value: 'chongsheng' },
+      { label: '魔幻', value: 'mohuan' },
+      { label: '宅系', value: 'zhaixi' },
+      { label: '武侠', value: 'wuxia' },
+      { label: 'C98', value: 'C98' },
+      { label: '生存', value: 'shengcun' },
+      { label: 'C95', value: 'comiket95' },
+      { label: 'FATE', value: 'fate' },
+      { label: '無修正', value: 'Uncensored' },
+      { label: '转生', value: 'zhuansheng' },
+      { label: 'LoveLive', value: 'loveLive' },
+      { label: '男同', value: 'nantong' },
+      { label: '仙侠', value: 'xianxia' },
+      { label: '玄幻', value: 'xuanhuan' },
+      { label: '真人', value: 'zhenren' },
+    ],
+  },
+  {
+    name: 'region',
+    options: [
+      { label: '选择地区', value: Options.Default },
+      { label: '日本', value: 'japan' },
+      { label: '韩国', value: 'korea' },
+      { label: '欧美', value: 'west' },
+      { label: '完结', value: 'finish' },
+    ],
+  },
+  {
+    name: 'sort',
+    options: [
+      { label: '更新时间⬇️', value: Options.Default },
+      { label: '更新时间⬆️', value: 'datetime_updated' },
+      { label: '热度⬇️', value: '-popular' },
+      { label: '热度⬆️', value: 'popular' },
+    ],
+  },
+];
+
+const PATTERN_HEADER = /(.+)\/(.+)/;
 
 class CopyManga extends Base {
-  readonly userAgent =
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1';
-  readonly defaultHeaders = {
+  readonly fetchHeaders = {
+    ...this.defaultHeaders,
     webp: '1',
     region: '1',
     platform: '1',
-    version: '2022.08.14',
-    pragma: 'no-cache',
+    version: '2022.10.20',
     accept: 'application/json',
-    origin: 'https://copymanga.site',
-    referer: 'https://copymanga.site/',
-    'user-agent': this.userAgent,
-    'cache-control': 'no-cache',
-    'accept-encoding': 'gzip, deflate, br',
-    'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
     'content-encoding': 'gzip, compress, br',
   };
+  readonly imageHeaders = {
+    ...this.defaultHeaders,
+    accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+  };
 
-  constructor(
-    pluginID: Plugin,
-    pluginName: string,
-    pluginScore: number,
-    pluginShortName: string,
-    pluginDescription: string
-  ) {
-    super(
-      pluginID,
-      pluginName,
-      pluginScore,
-      pluginShortName,
-      pluginDescription,
-      options.type,
-      options.region,
-      options.status,
-      options.sort
-    );
+  constructor() {
+    const userAgent =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1';
+    super({
+      score: 5,
+      id: Plugin.COPY,
+      name: 'copymanga',
+      shortName: 'COPY',
+      description: '拷贝漫画：资源全，甚至有本子分类',
+      href: 'https://copymanga.site/',
+      userAgent,
+      defaultHeaders: {
+        Referer: 'https://copymanga.site/',
+        'User-Agent': userAgent,
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      },
+      config: { origin: { label: '域名', value: 'https://api.copymanga.net' } },
+      option: { discovery: discoveryOptions, search: [] },
+    });
   }
 
-  is(hash: string) {
-    const [plugin] = Base.splitHash(hash);
-    return plugin === Plugin.COPY;
-  }
-
-  prepareDiscoveryFetch: Base['prepareDiscoveryFetch'] = (page, type, region, _status, sort) => {
+  prepareDiscoveryFetch: Base['prepareDiscoveryFetch'] = (page, { type, region, sort }) => {
     return {
       url: 'https://api.copymanga.net/api/v3/comics',
       body: {
@@ -200,7 +192,7 @@ class CopyManga extends Base {
         top: region === Options.Default ? undefined : region,
         _update: 'true',
       },
-      headers: new Headers(this.defaultHeaders),
+      headers: new Headers(this.fetchHeaders),
     };
   };
   prepareSearchFetch: Base['prepareSearchFetch'] = (keyword, page) => {
@@ -214,7 +206,7 @@ class CopyManga extends Base {
         q_type: '',
         _update: 'true',
       },
-      headers: new Headers(this.defaultHeaders),
+      headers: new Headers(this.fetchHeaders),
     };
   };
   prepareMangaInfoFetch: Base['prepareMangaInfoFetch'] = (mangaId) => {
@@ -223,7 +215,7 @@ class CopyManga extends Base {
       body: {
         platform: 1,
       },
-      headers: new Headers(this.defaultHeaders),
+      headers: new Headers(this.fetchHeaders),
     };
   };
   prepareChapterListFetch: Base['prepareChapterListFetch'] = (mangaId, page) => {
@@ -233,17 +225,16 @@ class CopyManga extends Base {
         limit: 100,
         offset: (page - 1) * 100,
       },
-      headers: new Headers(this.defaultHeaders),
+      headers: new Headers(this.fetchHeaders),
     };
   };
   prepareChapterFetch: Base['prepareChapterFetch'] = (mangaId, chapterId) => {
     return {
-      url: `https://api.copymanga.net/api/v3/comic/${mangaId}/chapter2/${chapterId}`,
-      body: {
-        platform: 1,
-        _update: 'true',
-      },
-      headers: new Headers(this.defaultHeaders),
+      url: `https://www.copymanga.site/comic/${mangaId}/chapter/${chapterId}`,
+      headers: new Headers({
+        'user-agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+      }),
     };
   };
 
@@ -260,23 +251,20 @@ class CopyManga extends Base {
               mangaId: item.path_word,
               cover: item.cover,
               title: item.name,
-              latest: '',
               updateTime: item.datetime_updated,
               author: item.author.map((obj) => obj.name),
               tag: item.theme.map((obj) => obj.name),
-              status: MangaStatus.Unknown,
-              chapters: [],
             };
           }),
         };
       } else {
-        throw new Error('Wrong response data: ' + JSON.stringify(res));
+        throw new Error(ErrorMessage.WrongResponse + res.message);
       }
     } catch (error) {
       if (error instanceof Error) {
         return { error };
       } else {
-        return { error: new Error('Unknown Error') };
+        return { error: new Error(ErrorMessage.Unknown) };
       }
     }
   };
@@ -294,23 +282,17 @@ class CopyManga extends Base {
               mangaId: item.path_word,
               cover: item.cover,
               title: item.name,
-              latest: '',
-              updateTime: '',
-              author: [],
-              tag: [],
-              status: MangaStatus.Unknown,
-              chapters: [],
             };
           }),
         };
       } else {
-        throw new Error('Wrong response data: ' + JSON.stringify(res));
+        throw new Error(ErrorMessage.WrongResponse + res.message);
       }
     } catch (error) {
       if (error instanceof Error) {
         return { error };
       } else {
-        return { error: new Error('Unknown Error') };
+        return { error: new Error(ErrorMessage.Unknown) };
       }
     }
   };
@@ -343,17 +325,16 @@ class CopyManga extends Base {
             author: author.map((obj) => obj.name),
             tag: theme.map((obj) => obj.name),
             status: mangaStatus,
-            chapters: [],
           },
         };
       } else {
-        throw new Error('Wrong response data: ' + JSON.stringify(res));
+        throw new Error(ErrorMessage.WrongResponse + res.message);
       }
     } catch (error) {
       if (error instanceof Error) {
         return { error };
       } else {
-        return { error: new Error('Unknown Error') };
+        return { error: new Error(ErrorMessage.Unknown) };
       }
     }
   };
@@ -378,62 +359,48 @@ class CopyManga extends Base {
           canLoadMore: total > limit + offset,
         };
       } else {
-        throw new Error('Wrong response data: ' + JSON.stringify(res));
+        throw new Error(ErrorMessage.WrongResponse + res.message);
       }
     } catch (error) {
       if (error instanceof Error) {
         return { error };
       } else {
-        return { error: new Error('Unknown Error') };
+        return { error: new Error(ErrorMessage.Unknown) };
       }
     }
   };
 
-  handleChapter: Base['handleChapter'] = (res: ChapterResponse) => {
+  handleChapter: Base['handleChapter'] = (
+    text: string | null,
+    mangaId: string,
+    chapterId: string
+  ) => {
     try {
-      if (res.code === 200) {
-        const { comic, chapter } = res.results;
-        const { contents, words } = chapter;
+      const $ = cheerio.load(text || '');
+      const contentkey = $('div.imageData').first().attr('contentkey') || '';
+      const images = JSON.parse(AESDecrypt(contentkey));
+      const [, name = '', title = ''] =
+        ($('h4.header').first().text() || '').match(PATTERN_HEADER) || [];
 
-        const ziped = words.map((item, index: number) => {
-          return {
-            url: contents[index].url,
-            index: item,
-          };
-        });
-        const sorted = ziped.sort((a, b) => a.index - b.index);
-
-        return {
-          chapter: {
-            hash: Base.combineHash(this.id, comic.path_word, chapter.uuid),
-            mangaId: comic.path_word,
-            chapterId: chapter.uuid,
-            name: comic.name,
-            title: chapter.name,
-            headers: {
-              ...this.defaultHeaders,
-              accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-            },
-            images: sorted.map((item) => ({ uri: item.url })),
-          },
-        };
-      } else {
-        throw new Error('Wrong response data: ' + JSON.stringify(res));
-      }
+      return {
+        chapter: {
+          hash: Base.combineHash(this.id, mangaId, chapterId),
+          mangaId,
+          chapterId,
+          name,
+          title,
+          headers: this.imageHeaders,
+          images: images.map((item: { url: string }) => ({ uri: item.url })),
+        },
+      };
     } catch (error) {
       if (error instanceof Error) {
         return { error };
       } else {
-        return { error: new Error('Unknown Error') };
+        return { error: new Error(ErrorMessage.Unknown) };
       }
     }
   };
 }
 
-export default new CopyManga(
-  Plugin.COPY,
-  'copymanga',
-  5,
-  'COPY',
-  '拷贝漫画，资源全，甚至有本子分类'
-);
+export default new CopyManga();

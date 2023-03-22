@@ -1,21 +1,28 @@
 import React, { ReactNode, useState, memo } from 'react';
-import { useSharedValue, useAnimatedStyle, withTiming, runOnJS } from 'react-native-reanimated';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  runOnJS,
+} from 'react-native-reanimated';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { Dimensions } from 'react-native';
 import { Box } from 'native-base';
-import Animated from 'react-native-reanimated';
 
 const doubleTapScaleValue = 2;
 const windowWidth = Dimensions.get('window').width;
 const windowHeight = Dimensions.get('window').height;
+const oneThirdWidth = windowWidth / 3;
+const oneTwoWidth = windowWidth / 2;
 
 interface ControllerProps {
-  onTap?: () => void;
+  onTap?: (position: 'left' | 'mid' | 'right') => void;
+  onLongPress?: (positoin: 'left' | 'right') => void;
   children: ReactNode;
   horizontal?: boolean;
 }
 
-const Controller = ({ onTap, children, horizontal = false }: ControllerProps) => {
+const Controller = ({ onTap, children, horizontal = false, onLongPress }: ControllerProps) => {
   const [enabled, setEnabled] = useState(false);
   const width = useSharedValue(windowWidth);
   const height = useSharedValue(windowHeight);
@@ -46,8 +53,18 @@ const Controller = ({ onTap, children, horizontal = false }: ControllerProps) =>
     .runOnJS(true)
     .maxDuration(300)
     .numberOfTaps(1)
-    .onStart(() => {
-      onTap && onTap();
+    .onStart((e) => {
+      if (savedScale.value === 1 && horizontal) {
+        if (e.x < oneThirdWidth) {
+          onTap && onTap('left');
+        } else if (e.x < oneThirdWidth * 2) {
+          onTap && onTap('mid');
+        } else {
+          onTap && onTap('right');
+        }
+      } else {
+        onTap && onTap('mid');
+      }
     });
   const doubleTap = Gesture.Tap()
     .maxDuration(300)
@@ -81,6 +98,18 @@ const Controller = ({ onTap, children, horizontal = false }: ControllerProps) =>
         savedTranslationX.value = currentX;
         savedTranslationY.value = currentY;
         runOnJS(setEnabled)(doubleTapScaleValue > 1);
+      }
+    });
+  const longPress = Gesture.LongPress()
+    .runOnJS(true)
+    .minDuration(2000)
+    .onStart((e) => {
+      if (onLongPress) {
+        if (e.x < oneTwoWidth) {
+          onLongPress('left');
+        } else {
+          onLongPress('right');
+        }
       }
     });
   const pinchGesture = Gesture.Pinch()
@@ -155,7 +184,7 @@ const Controller = ({ onTap, children, horizontal = false }: ControllerProps) =>
     });
 
   return (
-    <GestureDetector gesture={Gesture.Exclusive(doubleTap, singleTap)}>
+    <GestureDetector gesture={Gesture.Exclusive(doubleTap, singleTap, longPress)}>
       <GestureDetector gesture={pinchGesture}>
         <GestureDetector gesture={panGesture}>
           {horizontal ? (

@@ -3,7 +3,7 @@ import queryString from 'query-string';
 export interface FetchData {
   url: string;
   method?: GET | POST;
-  body?: FormData | { [key: string]: any };
+  body?: FormData | Record<string, any>;
   headers?: Headers;
   timeout?: number;
 }
@@ -21,7 +21,7 @@ export const fetchData = ({
     headers,
     signal: controller.signal,
     redirect: 'follow',
-    credentials: 'omit',
+    credentials: 'include',
   };
 
   if (Object.keys(body).length > 0) {
@@ -39,7 +39,7 @@ export const fetchData = ({
     }
   }
 
-  return new Promise((res) => {
+  return new Promise<{ error: Error; data: undefined } | { error: undefined; data: any }>((res) => {
     try {
       fetch(url, init)
         .then((response) => {
@@ -64,7 +64,7 @@ export const fetchData = ({
         controller.abort();
       }, timeout);
     } catch (error) {
-      res({ error, data: undefined });
+      res({ error: error as Error, data: undefined });
     }
   });
 };

@@ -1,5 +1,5 @@
 import Base, { Plugin, Options } from './base';
-import { MangaStatus } from '~/utils';
+import { MangaStatus, ErrorMessage } from '~/utils';
 import moment from 'moment';
 import * as cheerio from 'cheerio';
 
@@ -39,53 +39,65 @@ interface SearchItem {
   cover: string;
 }
 
-const options = {
-  type: [
-    { label: '选择分类', value: Options.Default },
-    { label: '冒险', value: '1' },
-    { label: '欢乐向', value: '2' },
-    { label: '格斗', value: '3' },
-    { label: '科幻', value: '4' },
-    { label: '爱情', value: '5' },
-    { label: '竞技', value: '6' },
-    { label: '魔法', value: '7' },
-    { label: '校园', value: '8' },
-    { label: '悬疑', value: '9' },
-    { label: '恐怖', value: '10' },
-    { label: '生活亲情', value: '11' },
-    { label: '百合', value: '12' },
-    { label: '伪娘', value: '13' },
-    { label: '耽美', value: '14' },
-    { label: '后宫', value: '15' },
-    { label: '萌系', value: '16' },
-    { label: '治愈', value: '17' },
-    { label: '武侠', value: '18' },
-    { label: '职场', value: '19' },
-    { label: '奇幻', value: '20' },
-    { label: '节操', value: '21' },
-    { label: '轻小说', value: '22' },
-    { label: '搞笑', value: '23' },
-  ],
-  region: [
-    { label: '选择地区', value: Options.Default },
-    { label: '日本', value: '1' },
-    { label: '内地', value: '2' },
-    { label: '欧美', value: '3' },
-    { label: '港台', value: '4' },
-    { label: '韩国', value: '5' },
-    { label: '其他', value: '6' },
-  ],
-  status: [
-    { label: '选择状态', value: Options.Default },
-    { label: '连载中', value: '1' },
-    { label: '已完结', value: '2' },
-  ],
-  sort: [
-    { label: '选择排序', value: Options.Default },
-    { label: '浏览次数', value: '0' },
-    { label: '更新时间', value: '1' },
-  ],
-};
+const discoveryOptions = [
+  {
+    name: 'type',
+    options: [
+      { label: '选择分类', value: Options.Default },
+      { label: '冒险', value: '1' },
+      { label: '欢乐向', value: '2' },
+      { label: '格斗', value: '3' },
+      { label: '科幻', value: '4' },
+      { label: '爱情', value: '5' },
+      { label: '竞技', value: '6' },
+      { label: '魔法', value: '7' },
+      { label: '校园', value: '8' },
+      { label: '悬疑', value: '9' },
+      { label: '恐怖', value: '10' },
+      { label: '生活亲情', value: '11' },
+      { label: '百合', value: '12' },
+      { label: '伪娘', value: '13' },
+      { label: '耽美', value: '14' },
+      { label: '后宫', value: '15' },
+      { label: '萌系', value: '16' },
+      { label: '治愈', value: '17' },
+      { label: '武侠', value: '18' },
+      { label: '职场', value: '19' },
+      { label: '奇幻', value: '20' },
+      { label: '节操', value: '21' },
+      { label: '轻小说', value: '22' },
+      { label: '搞笑', value: '23' },
+    ],
+  },
+  {
+    name: 'region',
+    options: [
+      { label: '选择地区', value: Options.Default },
+      { label: '日本', value: '1' },
+      { label: '内地', value: '2' },
+      { label: '欧美', value: '3' },
+      { label: '港台', value: '4' },
+      { label: '韩国', value: '5' },
+      { label: '其他', value: '6' },
+    ],
+  },
+  {
+    name: 'status',
+    options: [
+      { label: '选择状态', value: Options.Default },
+      { label: '连载中', value: '1' },
+      { label: '已完结', value: '2' },
+    ],
+  },
+  {
+    name: 'sort',
+    options: [
+      { label: '选择排序', value: Options.Default },
+      { label: '浏览次数', value: '0' },
+      { label: '更新时间', value: '1' },
+    ],
+  },
+];
 
 const PATTERN_SEARCH_SCRIPT = /var serchArry=(.*)/;
 const PATTERN_INFO_SCRIPT = /initIntroData\((.*)\);/;
@@ -95,36 +107,24 @@ const PATTERN_MANGA_TITLE = /\/(.*)\//;
 const PATTERN_FULL_TIME = /[0-9]{4}-[0-9]{2}-[0-9]{2}/;
 
 class DongManZhiJia extends Base {
-  readonly userAgent =
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1';
-  readonly defaultHeaders = { 'user-agent': this.userAgent };
-
-  constructor(
-    pluginID: Plugin,
-    pluginName: string,
-    pluginScore: number,
-    pluginShortName: string,
-    pluginDescription: string
-  ) {
-    super(
-      pluginID,
-      pluginName,
-      pluginScore,
-      pluginShortName,
-      pluginDescription,
-      options.type,
-      options.region,
-      options.status,
-      options.sort
-    );
+  constructor() {
+    const userAgent =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1';
+    super({
+      score: 4,
+      id: Plugin.DMZJ,
+      name: 'dongmanzhijia',
+      shortName: 'DMZJ',
+      description: '动漫之家：访问速度快，但资源不如以前',
+      href: 'https://m.dmzj.com',
+      userAgent,
+      defaultHeaders: { 'User-Agent': userAgent },
+      config: { origin: { label: '域名', value: 'https://m.dmzj.com' } },
+      option: { discovery: discoveryOptions, search: [] },
+    });
   }
 
-  is(hash: string) {
-    const [plugin] = Base.splitHash(hash);
-    return plugin === Plugin.JMC;
-  }
-
-  prepareDiscoveryFetch: Base['prepareDiscoveryFetch'] = (page, type, region, status, sort) => {
+  prepareDiscoveryFetch: Base['prepareDiscoveryFetch'] = (page, { type, region, status, sort }) => {
     if (type === Options.Default) {
       type = '0';
     }
@@ -186,14 +186,13 @@ class DongManZhiJia extends Base {
               : item.status === '已完结'
               ? MangaStatus.End
               : MangaStatus.Unknown,
-          chapters: [],
         })),
       };
     } catch (error) {
       if (error instanceof Error) {
         return { error };
       } else {
-        return { error: new Error('Unknown Error') };
+        return { error: new Error(ErrorMessage.Unknown) };
       }
     }
   };
@@ -208,7 +207,7 @@ class DongManZhiJia extends Base {
         )[0].children[0].data || '';
       const [, stringifyData] = scriptContent.match(PATTERN_SEARCH_SCRIPT) || [];
 
-      const list: Manga[] = (
+      const list: IncreaseManga[] = (
         (JSON.parse(stringifyData.replace(/[\n|\s]/g, '')) || []) as SearchItem[]
       ).map((item) => {
         return {
@@ -229,7 +228,6 @@ class DongManZhiJia extends Base {
           updateTime: moment.unix(item.last_updatetime).format('YYYY-MM-DD'),
           author: item.authors.split('/'),
           tag: item.types.split('/'),
-          chapters: [],
         };
       });
 
@@ -238,7 +236,7 @@ class DongManZhiJia extends Base {
       if (error instanceof Error) {
         return { error };
       } else {
-        return { error: new Error('Unknown Error') };
+        return { error: new Error(ErrorMessage.Unknown) };
       }
     }
   };
@@ -246,7 +244,7 @@ class DongManZhiJia extends Base {
   handleMangaInfo: Base['handleMangaInfo'] = (text: string | null) => {
     try {
       const $ = cheerio.load(text || '');
-      const manga: Manga = {
+      const manga: IncreaseManga = {
         href: '',
         hash: '',
         source: this.id,
@@ -322,7 +320,7 @@ class DongManZhiJia extends Base {
             (item) => item.type === 'tag' && item.name === 'span' && item.children.length > 0
           )[0] as cheerio.TagElement
         ).children[0].data || '';
-      const [updateTime] = fullTime.match(PATTERN_FULL_TIME) || [];
+      const [updateTime = ''] = fullTime.match(PATTERN_FULL_TIME) || [];
 
       if (statusLabel === '连载') {
         manga.status = MangaStatus.Serial;
@@ -347,13 +345,13 @@ class DongManZhiJia extends Base {
       if (error instanceof Error) {
         return { error };
       } else {
-        return { error: new Error('Unknown Error') };
+        return { error: new Error(ErrorMessage.Unknown) };
       }
     }
   };
 
   handleChapterList: Base['handleChapterList'] = () => {
-    return { error: new Error('Plugin DMZJ not support handleChapterList') };
+    return { error: new Error(ErrorMessage.NoSupport + 'handleChapterList') };
   };
 
   handleChapter: Base['handleChapter'] = (text: string | null) => {
@@ -382,8 +380,6 @@ class DongManZhiJia extends Base {
             host: 'images.dmzj.com',
             referer: 'https://m.dmzj.com/',
             accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-            pragma: 'no-cache',
-            'cache-control': 'no-cache',
             'accept-encoding': 'gzip, deflate, br',
             'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
           },
@@ -394,16 +390,10 @@ class DongManZhiJia extends Base {
       if (error instanceof Error) {
         return { error };
       } else {
-        return { error: new Error('Unknown Error') };
+        return { error: new Error(ErrorMessage.Unknown) };
       }
     }
   };
 }
 
-export default new DongManZhiJia(
-  Plugin.DMZJ,
-  'dongmanzhijia',
-  4,
-  'DMZJ',
-  '动漫之家，资源不如以前，访问速度快'
-);
+export default new DongManZhiJia();

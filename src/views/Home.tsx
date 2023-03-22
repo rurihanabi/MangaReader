@@ -1,34 +1,33 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { action, useAppSelector, useAppDispatch } from '~/redux';
-import { HStack, IconButton, Icon, View, Text } from 'native-base';
-import { AsyncStatus, isManga } from '~/utils';
-import { useErrorMessageToast } from '~/hooks';
-import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import { nonNullable, AsyncStatus } from '~/utils';
+import { View, Text, HStack } from 'native-base';
+import { useFocusEffect } from '@react-navigation/native';
+import VectorIcon from '~/components/VectorIcon';
 import Bookshelf from '~/components/Bookshelf';
 import Rotate from '~/components/Rotate';
 import * as RootNavigation from '~/utils/navigation';
 
-const { launch, batchUpdate } = action;
+const { batchUpdate } = action;
 
 const Home = ({ navigation: { navigate } }: StackHomeProps) => {
-  const dispatch = useAppDispatch();
   const list = useAppSelector((state) => state.favorites);
   const dict = useAppSelector((state) => state.dict.manga);
+  const activeList = useAppSelector((state) => state.batch.stack);
   const loadStatus = useAppSelector((state) => state.app.launchStatus);
 
   const favoriteList = useMemo(
-    () => list.map((item) => dict[item.mangaHash]).filter(isManga),
+    () => list.map((item) => dict[item.mangaHash]).filter(nonNullable),
     [dict, list]
   );
   const trendList = useMemo(
-    () => list.filter((item) => item.isTrend === true).map((item) => item.mangaHash),
+    () => list.filter((item) => item.isTrend).map((item) => item.mangaHash),
     [list]
   );
-
-  useErrorMessageToast();
-  useEffect(() => {
-    dispatch(launch());
-  }, [dispatch]);
+  const negativeList = useMemo(
+    () => list.filter((item) => !item.inQueue).map((item) => item.mangaHash),
+    [list]
+  );
 
   const handleDetail = (mangaHash: string) => {
     navigate('Detail', { mangaHash });
@@ -36,8 +35,11 @@ const Home = ({ navigation: { navigate } }: StackHomeProps) => {
 
   return (
     <Bookshelf
+      emptyText="还没有收藏~"
       list={favoriteList}
-      trends={trendList}
+      trendList={trendList}
+      activeList={activeList}
+      negativeList={negativeList}
       itemOnPress={handleDetail}
       loading={loadStatus === AsyncStatus.Pending}
     />
@@ -45,14 +47,19 @@ const Home = ({ navigation: { navigate } }: StackHomeProps) => {
 };
 
 export const SearchAndAbout = () => {
-  const [isRotate, setIsRotate] = useState(false);
   const dispatch = useAppDispatch();
-  const { loadStatus: batchStatus, queue, fail } = useAppSelector((state) => state.batch);
+  const { loadStatus: batchStatus, stack, queue, fail } = useAppSelector((state) => state.batch);
+  const [enableRotate, setEnableRotate] = useState(false);
 
-  useEffect(() => {
-    setIsRotate(batchStatus === AsyncStatus.Pending);
-  }, [batchStatus]);
+  useFocusEffect(
+    useCallback(() => {
+      setEnableRotate(batchStatus === AsyncStatus.Pending);
+    }, [batchStatus])
+  );
 
+  const handleScan = () => {
+    RootNavigation.navigate('Scan');
+  };
   const handleSearch = () => {
     RootNavigation.navigate('Discovery');
   };
@@ -62,21 +69,15 @@ export const SearchAndAbout = () => {
 
   return (
     <HStack flexShrink={0}>
-      <IconButton
-        icon={<Icon as={MaterialIcons} name="search" size={30} color="white" />}
-        onPress={handleSearch}
-      />
+      <VectorIcon name="qr-code-scanner" onPress={handleScan} />
+      <VectorIcon name="search" onPress={handleSearch} />
       <View position="relative">
-        <Rotate isRotate={isRotate}>
-          <IconButton
-            isDisabled={isRotate}
-            icon={<Icon as={MaterialIcons} name="autorenew" size={30} color="white" />}
-            onPress={handleUpdate}
-          />
+        <Rotate enable={enableRotate}>
+          <VectorIcon isDisabled={enableRotate} name="autorenew" onPress={handleUpdate} />
         </Rotate>
         {batchStatus === AsyncStatus.Pending && (
           <Text position="absolute" top={0} right={0} color="white" fontWeight="extrabold">
-            {queue.length}
+            {queue.length + stack.length}
           </Text>
         )}
         {batchStatus !== AsyncStatus.Pending && fail.length > 0 && (

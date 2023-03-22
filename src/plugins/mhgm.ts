@@ -1,72 +1,87 @@
 import Base, { Plugin, Options } from './base';
-import { MangaStatus } from '~/utils';
+import { MangaStatus, ErrorMessage } from '~/utils';
 import queryString from 'query-string';
 import LZString from 'lz-string';
 import * as cheerio from 'cheerio';
 
-const options = {
-  type: [
-    { label: '选择分类', value: Options.Default },
-    { label: '连载', value: 'lianzai' },
-    { label: '完结', value: 'wanjie' },
-    { label: '日本', value: 'japan' },
-    { label: '港台', value: 'hongkong' },
-    { label: '其他', value: 'other' },
-    { label: '欧美', value: 'europe' },
-    { label: '内地', value: 'china' },
-    { label: '韩国', value: 'korea' },
-    { label: '热血', value: 'rexue' },
-    { label: '冒险', value: 'maoxian' },
-    { label: '魔幻', value: 'mohuan' },
-    { label: '神鬼', value: 'shengui' },
-    { label: '搞笑', value: 'gaoxiao' },
-    { label: '萌系', value: 'mengxi' },
-    { label: '爱情', value: 'aiqing' },
-    { label: '科幻', value: 'kehuan' },
-    { label: '魔法', value: 'mofa' },
-    { label: '格斗', value: 'gedou' },
-    { label: '武侠', value: 'wuxia' },
-    { label: '机战', value: 'jizhan' },
-    { label: '战争', value: 'zhanzheng' },
-    { label: '竞技', value: 'jingji' },
-    { label: '体育', value: 'tiyu' },
-    { label: '校园', value: 'xiaoyuan' },
-    { label: '生活', value: 'shenghuo' },
-    { label: '励志', value: 'lizhi' },
-    { label: '历史', value: 'lishi' },
-    { label: '伪娘', value: 'weiniang' },
-    { label: '宅男', value: 'zhainan' },
-    { label: '腐女', value: 'funv' },
-    { label: '耽美', value: 'danmei' },
-    { label: '百合', value: 'baihe' },
-    { label: '后宫', value: 'hougong' },
-    { label: '治愈', value: 'zhiyu' },
-    { label: '美食', value: 'meishi' },
-    { label: '推理', value: 'tuili' },
-    { label: '悬疑', value: 'xuanyi' },
-    { label: '恐怖', value: 'kongbu' },
-    { label: '四格', value: 'sige' },
-    { label: '职场', value: 'zhichang' },
-    { label: '侦探', value: 'zhentan' },
-    { label: '社会', value: 'shehui' },
-    { label: '音乐', value: 'yinyue' },
-    { label: '舞蹈', value: 'wudao' },
-    { label: '杂志', value: 'zazhi' },
-    { label: '黑道', value: 'heidao' },
-    { label: '少女', value: 'shaonv' },
-    { label: '少年', value: 'shaonian' },
-    { label: '青年', value: 'qingnian' },
-    { label: '儿童', value: 'ertong' },
-    { label: '通用', value: 'tongyong' },
-  ],
-  region: [{ label: '选择地区', value: Options.Default }],
-  status: [{ label: '选择状态', value: Options.Default }],
-  sort: [
-    { label: '添加时间', value: Options.Default },
-    { label: '更新时间', value: 'update' },
-    { label: '浏览次数', value: 'view' },
-  ],
-};
+const discoveryOptions = [
+  {
+    name: 'type',
+    options: [
+      { label: '选择分类', value: Options.Default },
+      { label: '连载', value: 'lianzai' },
+      { label: '完结', value: 'wanjie' },
+      { label: '日本', value: 'japan' },
+      { label: '港台', value: 'hongkong' },
+      { label: '其他', value: 'other' },
+      { label: '欧美', value: 'europe' },
+      { label: '内地', value: 'china' },
+      { label: '韩国', value: 'korea' },
+      { label: '热血', value: 'rexue' },
+      { label: '冒险', value: 'maoxian' },
+      { label: '魔幻', value: 'mohuan' },
+      { label: '神鬼', value: 'shengui' },
+      { label: '搞笑', value: 'gaoxiao' },
+      { label: '萌系', value: 'mengxi' },
+      { label: '爱情', value: 'aiqing' },
+      { label: '科幻', value: 'kehuan' },
+      { label: '魔法', value: 'mofa' },
+      { label: '格斗', value: 'gedou' },
+      { label: '武侠', value: 'wuxia' },
+      { label: '机战', value: 'jizhan' },
+      { label: '战争', value: 'zhanzheng' },
+      { label: '竞技', value: 'jingji' },
+      { label: '体育', value: 'tiyu' },
+      { label: '校园', value: 'xiaoyuan' },
+      { label: '生活', value: 'shenghuo' },
+      { label: '励志', value: 'lizhi' },
+      { label: '历史', value: 'lishi' },
+      { label: '伪娘', value: 'weiniang' },
+      { label: '宅男', value: 'zhainan' },
+      { label: '腐女', value: 'funv' },
+      { label: '耽美', value: 'danmei' },
+      { label: '百合', value: 'baihe' },
+      { label: '后宫', value: 'hougong' },
+      { label: '治愈', value: 'zhiyu' },
+      { label: '美食', value: 'meishi' },
+      { label: '推理', value: 'tuili' },
+      { label: '悬疑', value: 'xuanyi' },
+      { label: '恐怖', value: 'kongbu' },
+      { label: '四格', value: 'sige' },
+      { label: '职场', value: 'zhichang' },
+      { label: '侦探', value: 'zhentan' },
+      { label: '社会', value: 'shehui' },
+      { label: '音乐', value: 'yinyue' },
+      { label: '舞蹈', value: 'wudao' },
+      { label: '杂志', value: 'zazhi' },
+      { label: '黑道', value: 'heidao' },
+      { label: '少女', value: 'shaonv' },
+      { label: '少年', value: 'shaonian' },
+      { label: '青年', value: 'qingnian' },
+      { label: '儿童', value: 'ertong' },
+      { label: '通用', value: 'tongyong' },
+    ],
+  },
+  {
+    name: 'sort',
+    options: [
+      { label: '添加时间', value: Options.Default },
+      { label: '更新时间', value: 'update' },
+      { label: '浏览次数', value: 'view' },
+    ],
+  },
+];
+const searchOptions = [
+  {
+    name: 'sort',
+    options: [
+      { label: '添加时间', value: Options.Default },
+      { label: '更新时间', value: '1' },
+      { label: '浏览次数', value: '2' },
+    ],
+  },
+];
+
 const PATTERN_MANGA_ID = /^https:\/\/m\.manhuagui\.com\/comic\/([0-9]+)/;
 const PATTERN_MANGA_INFO = /{ bid:([0-9]*), status:[0-9]*,block_cc:'' }/;
 const PATTERN_CHAPTER_ID = /^https:\/\/m\.manhuagui\.com\/comic\/[0-9]+\/([0-9]+)(?=\.html|$)/;
@@ -74,50 +89,27 @@ const PATTERN_SCRIPT = /^window\["\\x65\\x76\\x61\\x6c"\](.+)(?=$)/;
 const PATTERN_READER_DATA = /^SMH\.reader\((.+)(?=\)\.preInit\(\);)/;
 const PATTERN_FULL_TIME = /[0-9]{4}-[0-9]{2}-[0-9]{2}/;
 const PATTERN_AUTHOR = /作者：(.*)/;
+const PATTERN_TAG = /类别：(.*)/;
 
 class ManHuaGuiMobile extends Base {
-  readonly useMock = false;
-  readonly userAgent =
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1';
-  readonly defaultHeaders = { 'user-agent': this.userAgent };
-
-  constructor(
-    pluginID: Plugin,
-    pluginName: string,
-    pluginScore: number,
-    pluginShortName: string,
-    pluginDescription: string
-  ) {
-    super(
-      pluginID,
-      pluginName,
-      pluginScore,
-      pluginShortName,
-      pluginDescription,
-      options.type,
-      options.region,
-      options.status,
-      options.sort
-    );
+  constructor() {
+    const userAgent =
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1';
+    super({
+      score: 5,
+      id: Plugin.MHGM,
+      name: 'manhuagui(mobile)',
+      shortName: 'MHGM',
+      description: '漫画柜移动版：需要代理，频繁访问会封IP',
+      href: 'https://m.manhuagui.com',
+      userAgent,
+      defaultHeaders: { 'User-Agent': userAgent },
+      config: { origin: { label: '域名', value: 'https://m.manhuagui.com' } },
+      option: { discovery: discoveryOptions, search: searchOptions },
+    });
   }
 
-  is(hash: string) {
-    const [plugin] = Base.splitHash(hash);
-    return plugin === Plugin.MHGM;
-  }
-
-  prepareDiscoveryFetch: Base['prepareDiscoveryFetch'] = (page, type, _region, _status, sort) => {
-    if (this.useMock) {
-      return {
-        url: process.env.PROXY + '/mhgm/update',
-        body: {
-          page,
-          ajax: 1,
-          order: 1,
-        },
-      };
-    }
-
+  prepareDiscoveryFetch: Base['prepareDiscoveryFetch'] = (page, { type, sort }) => {
     return {
       url: `https://m.manhuagui.com/list/${type !== Options.Default ? type + '/' : ''}`,
       body: {
@@ -126,38 +118,24 @@ class ManHuaGuiMobile extends Base {
         ajax: 1,
         order: sort === Options.Default ? '' : sort,
       },
-      headers: new Headers(this.defaultHeaders),
+      headers: new Headers({ ...this.defaultHeaders, host: 'm.manhuagui.com' }),
     };
   };
-  prepareSearchFetch: Base['prepareSearchFetch'] = (keyword, page) => {
+  prepareSearchFetch: Base['prepareSearchFetch'] = (keyword, page, { sort }) => {
     const body = new FormData();
     body.append('key', keyword);
     body.append('page', String(page));
     body.append('ajax', '1');
     body.append('order', '1');
 
-    if (this.useMock) {
-      return {
-        url: process.env.PROXY + '/mhgm/search',
-        method: 'POST',
-        body: page > 1 ? body : undefined,
-      };
-    }
-
     return {
-      url: `https://m.manhuagui.com/s/${keyword}.html/`,
+      url: `https://m.manhuagui.com/s/${keyword}_o${sort === Options.Default ? '0' : sort}.html/`,
       method: 'POST',
       body: page > 1 ? body : undefined,
       headers: new Headers(this.defaultHeaders),
     };
   };
   prepareMangaInfoFetch: Base['prepareMangaInfoFetch'] = (mangaId) => {
-    if (this.useMock) {
-      return {
-        url: process.env.PROXY + '/mhgm/manga',
-      };
-    }
-
     return {
       url: 'https://m.manhuagui.com/comic/' + mangaId,
       headers: new Headers(this.defaultHeaders),
@@ -165,12 +143,6 @@ class ManHuaGuiMobile extends Base {
   };
   prepareChapterListFetch: Base['prepareChapterListFetch'] = () => {};
   prepareChapterFetch: Base['prepareChapterFetch'] = (mangaId, chapterId) => {
-    if (this.useMock) {
-      return {
-        url: process.env.PROXY + '/mhgm/chapter',
-      };
-    }
-
     return {
       url: `https://m.manhuagui.com/comic/${mangaId}/${chapterId}.html`,
       headers: new Headers(this.defaultHeaders),
@@ -180,7 +152,7 @@ class ManHuaGuiMobile extends Base {
   handleDiscovery: Base['handleDiscovery'] = (text: string | null) => {
     try {
       const $ = cheerio.load(text || '');
-      const list: Manga[] = [];
+      const list: IncreaseManga[] = [];
 
       ($('li > a').toArray() as cheerio.TagElement[]).forEach((a) => {
         const $$ = cheerio.load(a);
@@ -220,9 +192,8 @@ class ManHuaGuiMobile extends Base {
           cover,
           latest,
           updateTime,
-          author,
-          tag,
-          chapters: [],
+          author: author.map((item) => item.split(',')).flat(),
+          tag: tag.map((item) => item.split(',')).flat(),
         });
       });
 
@@ -231,7 +202,7 @@ class ManHuaGuiMobile extends Base {
       if (error instanceof Error) {
         return { error };
       } else {
-        return { error: new Error('Unknown Error') };
+        return { error: new Error(ErrorMessage.Unknown) };
       }
     }
   };
@@ -239,7 +210,7 @@ class ManHuaGuiMobile extends Base {
   handleSearch: Base['handleSearch'] = (text: string | null) => {
     try {
       const $ = cheerio.load(text || '');
-      const list: Manga[] = [];
+      const list: IncreaseManga[] = [];
 
       ($('ul#detail > li > a').toArray() as cheerio.TagElement[]).forEach((a) => {
         const $$ = cheerio.load(a);
@@ -279,9 +250,8 @@ class ManHuaGuiMobile extends Base {
           cover,
           latest,
           updateTime,
-          author,
-          tag,
-          chapters: [],
+          author: author.map((item) => item.split(',')).flat(),
+          tag: tag.map((item) => item.split(',')).flat(),
         });
       });
 
@@ -290,7 +260,7 @@ class ManHuaGuiMobile extends Base {
       if (error instanceof Error) {
         return { error };
       } else {
-        return { error: new Error('Unknown Error') };
+        return { error: new Error(ErrorMessage.Unknown) };
       }
     }
   };
@@ -298,7 +268,7 @@ class ManHuaGuiMobile extends Base {
   handleMangaInfo: Base['handleMangaInfo'] = (text: string | null) => {
     try {
       const $ = cheerio.load(text || '');
-      const manga: Manga = {
+      const manga: IncreaseManga = {
         href: '',
         hash: '',
         source: this.id,
@@ -322,11 +292,12 @@ class ManHuaGuiMobile extends Base {
       const [, mangaId] = scriptContent.match(PATTERN_MANGA_INFO) || [];
       const statusLabel = $('div.book-detail div.thumb i').first().text(); // 连载 or 完结
 
-      const [latest, updateTimeLabel = '', authorLabel = '', tag] = $('div.cont-list dl')
+      const [latest, updateTimeLabel = '', authorLabel = '', tagLabel] = $('div.cont-list dl')
         .toArray()
         .map((dl) => cheerio.load(dl).root().text());
+      const [, tag] = tagLabel.match(PATTERN_TAG) || [];
       const [, author] = authorLabel.match(PATTERN_AUTHOR) || [];
-      const [updateTime] = updateTimeLabel.match(PATTERN_FULL_TIME) || [];
+      const [updateTime = ''] = updateTimeLabel.match(PATTERN_FULL_TIME) || [];
 
       const isAudit = $('#erroraudit_show').length > 0;
 
@@ -392,13 +363,13 @@ class ManHuaGuiMobile extends Base {
       if (error instanceof Error) {
         return { error };
       } else {
-        return { error: new Error('Unknown Error') };
+        return { error: new Error(ErrorMessage.Unknown) };
       }
     }
   };
 
   handleChapterList: Base['handleChapterList'] = () => {
-    return { error: new Error('Plugin MHGM not support handleChapterList') };
+    return { error: new Error(ErrorMessage.NoSupport + 'handleChapterList') };
   };
 
   handleChapter: Base['handleChapter'] = (text: string | null) => {
@@ -409,7 +380,7 @@ class ManHuaGuiMobile extends Base {
       );
 
       if (scriptAfterFilter.length <= 0) {
-        throw new Error('without chapter info');
+        throw new Error(ErrorMessage.MissingChapterInfo);
       }
       const script = scriptAfterFilter[0].children[0].data || '';
       const [, scriptContent] = script.match(PATTERN_SCRIPT) || [];
@@ -433,8 +404,6 @@ class ManHuaGuiMobile extends Base {
             host: 'i.hamreus.com',
             referer: 'https://m.manhuagui.com/',
             accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-            pragma: 'no-cache',
-            'cache-control': 'no-cache',
             'accept-encoding': 'gzip, deflate, br',
             'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
           },
@@ -449,16 +418,10 @@ class ManHuaGuiMobile extends Base {
       if (error instanceof Error) {
         return { error };
       } else {
-        return { error: new Error('Unknown Error') };
+        return { error: new Error(ErrorMessage.Unknown) };
       }
     }
   };
 }
 
-export default new ManHuaGuiMobile(
-  Plugin.MHGM,
-  'manhuagui(mobile)',
-  5,
-  'MHGM',
-  '漫画柜移动版（主站），漫画资源全，频繁访问会封IP，需要代理'
-);
+export default new ManHuaGuiMobile();

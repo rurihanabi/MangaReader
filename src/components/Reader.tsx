@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback, Fragment } from 'react';
-import { Box, Text, Flex, Icon, IconButton, FlatList, StatusBar, useToast } from 'native-base';
+import React, { useState, useRef, useCallback, Fragment } from 'react';
 import { FlatList as FlatListRN, Dimensions, ListRenderItemInfo } from 'react-native';
-import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
-import ImageWithRetry from '~/components/ImageWithRetry';
-import JMComicImage from '~/components/JMComicImage';
-import Controller from '~/components/Controller';
+import { Box, Text, Flex, FlatList, StatusBar, useToast } from 'native-base';
+import { useFocusEffect } from '@react-navigation/native';
+import { AsyncStatus } from '~/utils';
 import PageSlider, { PageSliderRef } from '~/components/PageSlider';
+import ComicImage, { ImageState } from '~/components/ComicImage';
+import Controller from '~/components/Controller';
+import VectorIcon from '~/components/VectorIcon';
 
 const windowWidth = Dimensions.get('window').width;
 const lastPageToastId = 'LAST_PAGE_TOAST_ID';
@@ -13,23 +14,35 @@ const lastPageToastId = 'LAST_PAGE_TOAST_ID';
 interface ReaderProps {
   title?: string;
   initPage?: number;
+  inverted?: boolean;
   horizontal?: boolean;
   data?: Chapter['images'];
   headers?: Chapter['headers'];
   goBack: () => void;
-  onModeChange: (horizontal: boolean) => void;
+  onReload?: () => void;
+  onImageLoad?: (uri: string, index: number) => void;
+  onModeChange?: (horizontal: boolean) => void;
   onPageChange?: (page: number) => void;
+  onDirectionChange?: (inverted: boolean) => void;
+  onPrevChapter?: () => void;
+  onNextChapter?: () => void;
 }
 
 const Reader = ({
   title = '',
   initPage = 1,
+  inverted = false,
   horizontal = false,
   data = [],
   headers = {},
   goBack,
-  onPageChange,
+  onReload,
+  onImageLoad,
   onModeChange,
+  onPageChange,
+  onDirectionChange,
+  onPrevChapter,
+  onNextChapter,
 }: ReaderProps) => {
   const toast = useToast();
   const [page, setPage] = useState(initPage);
@@ -37,32 +50,86 @@ const Reader = ({
   const timeout = useRef<NodeJS.Timeout | null>(null);
   const flatListRef = useRef<FlatListRN>(null);
   const pageSliderRef = useRef<PageSliderRef>(null);
+  const itemStateRef = useRef<ImageState[]>([]);
   const initialScrollIndex = Math.max(Math.min(page - 1, data.length - 1), 0);
   const toastRef = useRef(toast);
   const dataRef = useRef(data);
   toastRef.current = toast;
   dataRef.current = data;
 
-  useEffect(() => {
-    onPageChange && onPageChange(page);
-  }, [page, onPageChange]);
+  useFocusEffect(
+    useCallback(() => {
+      onPageChange && onPageChange(page);
+    }, [page, onPageChange])
+  );
+  useFocusEffect(() => {
+    return () => timeout.current && clearTimeout(timeout.current);
+  });
 
-  const toggleExtra = useCallback(() => {
-    setShowExtra((prev) => !prev);
-  }, []);
+  const handlePrevPage = useCallback(() => {
+    flatListRef.current?.scrollToIndex({ index: Math.max(page - 2, 0), animated: true });
+  }, [page]);
+  const handleNextPage = useCallback(() => {
+    flatListRef.current?.scrollToIndex({ index: Math.min(page, data.length - 1), animated: true });
+  }, [page, data.length]);
+  const handleTap = useCallback(
+    (position: 'left' | 'mid' | 'right') => {
+      if (position === 'mid') {
+        setShowExtra((prev) => !prev);
+      }
+      if (inverted) {
+        if (position === 'right') {
+          handlePrevPage();
+        }
+        if (position === 'left') {
+          handleNextPage();
+        }
+      } else {
+        if (position === 'left') {
+          handlePrevPage();
+        }
+        if (position === 'right') {
+          handleNextPage();
+        }
+      }
+    },
+    [handlePrevPage, handleNextPage, inverted]
+  );
+  const handlePrevChapter = useCallback(() => {
+    onPrevChapter && onPrevChapter();
+  }, [onPrevChapter]);
+  const handleNextChapter = useCallback(() => {
+    onNextChapter && onNextChapter();
+  }, [onNextChapter]);
+  const handleLongPress = useCallback(
+    (position: 'left' | 'right') => {
+      if (inverted) {
+        if (position === 'right') {
+          handlePrevChapter();
+        }
+        if (position === 'left') {
+          handleNextChapter();
+        }
+      } else {
+        if (position === 'left') {
+          handlePrevChapter();
+        }
+        if (position === 'right') {
+          handleNextChapter();
+        }
+      }
+    },
+    [handlePrevChapter, handleNextChapter, inverted]
+  );
+
   const HandleViewableItemsChanged = useCallback(({ viewableItems }) => {
-    if (!viewableItems) {
+    if (!viewableItems || viewableItems.length <= 0) {
       return;
     }
     const last = viewableItems[viewableItems.length - 1];
     const newPage = last.index + 1;
     if (newPage === dataRef.current.length && !toastRef.current.isActive(lastPageToastId)) {
-      toastRef.current.show({
-        id: lastPageToastId,
-        placement: 'bottom',
-        title: '最后一页',
-        duration: 3000,
-      });
+      toastRef.current.show({ id: lastPageToastId, title: '最后一页' });
     }
     timeout.current && clearTimeout(timeout.current);
     timeout.current = setTimeout(() => {
@@ -71,50 +138,72 @@ const Reader = ({
     }, 200);
   }, []);
   const renderVerticalItem = useCallback(
-    ({ item }: ListRenderItemInfo<typeof data[0]>) => {
+    ({ item, index }: ListRenderItemInfo<(typeof data)[0]>) => {
       const { uri, needUnscramble } = item;
+      const cacheState = itemStateRef.current[index];
 
-      return needUnscramble ? (
-        <JMComicImage uri={uri} headers={headers} />
-      ) : (
-        <ImageWithRetry uri={uri} headers={headers} />
+      return (
+        <ComicImage
+          useJMC={needUnscramble}
+          uri={uri}
+          headers={headers}
+          prevState={cacheState}
+          onSuccess={({ height, hash, dataUrl }) => {
+            onImageLoad && onImageLoad(uri, index);
+            itemStateRef.current[index] = {
+              defaulthHash: hash,
+              defaultHeight: height,
+              defaultStatus: AsyncStatus.Fulfilled,
+              defaultDataUrl: dataUrl,
+            };
+          }}
+        />
       );
     },
-    [headers]
+    [headers, onImageLoad]
   );
   const renderHorizontalItem = useCallback(
-    ({ item }: ListRenderItemInfo<typeof data[0]>) => {
+    ({ item, index }: ListRenderItemInfo<(typeof data)[0]>) => {
       const { uri, needUnscramble } = item;
 
       return (
-        <Controller horizontal onTap={toggleExtra}>
-          {needUnscramble ? (
-            <JMComicImage horizontal uri={uri} headers={headers} />
-          ) : (
-            <ImageWithRetry horizontal uri={uri} headers={headers} />
-          )}
+        <Controller horizontal onTap={handleTap} onLongPress={handleLongPress}>
+          <ComicImage
+            horizontal
+            useJMC={needUnscramble}
+            uri={uri}
+            headers={headers}
+            onSuccess={() => {
+              onImageLoad && onImageLoad(uri, index);
+            }}
+          />
         </Controller>
       );
     },
-    [headers, toggleExtra]
+    [headers, handleTap, handleLongPress, onImageLoad]
   );
+
   const handleSliderChangeEnd = useCallback((newStep: number) => {
     const newPage = Math.floor(newStep);
 
     setPage(newPage);
-    if (newStep > 1) {
-      flatListRef.current?.scrollToIndex({ index: newPage - 1, animated: false });
-    } else {
-      // bug fix, more detail in https://codesandbox.io/s/brave-shape-310n3d?file=/src/App.js
-      flatListRef.current?.scrollToOffset({ offset: 1, animated: false });
-    }
+    flatListRef.current?.scrollToIndex({ index: newPage - 1, animated: false });
   }, []);
 
+  const handleReload = () => {
+    onReload && onReload();
+  };
+  const handleRight = () => {
+    onDirectionChange && onDirectionChange(false);
+  };
+  const handleLeft = () => {
+    onDirectionChange && onDirectionChange(true);
+  };
   const handleVertical = () => {
-    onModeChange(false);
+    onModeChange && onModeChange(false);
   };
   const handleHorizontal = () => {
-    onModeChange(true);
+    onModeChange && onModeChange(true);
   };
 
   return (
@@ -126,6 +215,7 @@ const Reader = ({
           h="full"
           ref={flatListRef}
           data={data}
+          inverted={inverted}
           horizontal
           pagingEnabled
           initialScrollIndex={initialScrollIndex}
@@ -147,12 +237,13 @@ const Reader = ({
           keyExtractor={(item) => item.uri}
         />
       ) : (
-        <Controller onTap={toggleExtra}>
+        <Controller onTap={handleTap} onLongPress={handleLongPress}>
           <FlatList
             w="full"
             h="full"
             ref={flatListRef}
             data={data}
+            inverted={inverted}
             windowSize={3}
             initialNumToRender={1}
             maxToRenderPerBatch={3}
@@ -176,42 +267,83 @@ const Reader = ({
             safeAreaLeft
             safeAreaRight
           >
-            <IconButton
-              icon={<Icon as={MaterialIcons} name="arrow-back" size={30} color="white" />}
-              onPress={goBack}
-            />
-            <Text fontSize="md" w="3/5" numberOfLines={1} color="white" fontWeight="bold">
+            <VectorIcon name="arrow-back" size="2xl" shadow="icon" onPress={goBack} />
+            <Text
+              flexShrink={1}
+              shadow="icon"
+              fontSize="md"
+              numberOfLines={1}
+              color="white"
+              fontWeight="bold"
+            >
               {title}
             </Text>
-            <Box flex={1} />
-            <Text color="white" fontWeight="bold">
+            <VectorIcon name="replay" size="md" shadow="icon" onPress={handleReload} />
+
+            <Box flexGrow={1} flexShrink={1} />
+
+            {horizontal &&
+              (inverted ? (
+                <VectorIcon name="west" size="lg" shadow="icon" onPress={handleRight} />
+              ) : (
+                <VectorIcon name="east" size="lg" shadow="icon" onPress={handleLeft} />
+              ))}
+            <Text shadow="icon" color="white" fontWeight="bold">
               {page} / {data.length}
             </Text>
             {horizontal ? (
-              <IconButton
-                icon={
-                  <Icon as={MaterialIcons} name="stay-primary-landscape" size="lg" color="white" />
-                }
+              <VectorIcon
+                name="stay-primary-landscape"
+                size="lg"
+                shadow="icon"
                 onPress={handleVertical}
               />
             ) : (
-              <IconButton
-                icon={
-                  <Icon as={MaterialIcons} name="stay-primary-portrait" size="lg" color="white" />
-                }
+              <VectorIcon
+                name="stay-primary-portrait"
+                size="lg"
+                shadow="icon"
                 onPress={handleHorizontal}
               />
             )}
           </Flex>
 
-          {horizontal && (
-            <PageSlider
-              ref={pageSliderRef}
-              max={data.length}
-              defaultValue={page}
-              onSliderChangeEnd={handleSliderChangeEnd}
-            />
-          )}
+          <Flex
+            w="full"
+            position="absolute"
+            bottom={8}
+            flexDirection="row"
+            alignItems="center"
+            justifyContent="center"
+            safeAreaLeft
+            safeAreaRight
+            safeAreaBottom
+          >
+            {onPrevChapter ? (
+              <VectorIcon
+                name="skip-previous"
+                size="lg"
+                shadow="icon"
+                onPress={handlePrevChapter}
+              />
+            ) : (
+              <Box w={45} />
+            )}
+            <Box w={0} flexGrow={1} px={1}>
+              <PageSlider
+                ref={pageSliderRef}
+                max={data.length}
+                defaultValue={page}
+                disabled={!horizontal}
+                onSliderChangeEnd={handleSliderChangeEnd}
+              />
+            </Box>
+            {onNextChapter ? (
+              <VectorIcon name="skip-next" size="lg" shadow="icon" onPress={handleNextChapter} />
+            ) : (
+              <Box w={45} />
+            )}
+          </Flex>
         </Fragment>
       )}
     </Box>

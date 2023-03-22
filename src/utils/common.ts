@@ -1,25 +1,18 @@
 import { delay, race, Effect } from 'redux-saga/effects';
+import { ErrorMessage } from './enum';
+import { Dimensions } from 'react-native';
+import queryString from 'query-string';
+import CryptoJS from 'crypto-js';
 
-export const coverAspectRatio = 210 / 297;
+export const PATTERN_VERSION = /v?([0-9]+)\.([0-9]+)\.([0-9]+)$/;
+export const PATTERN_PUBLISH_TIME = /([0-9]+)-([0-9]+)-([0-9]+)/;
+export const coverAspectRatio = 2 / 3;
 export const storageKey = {
   favorites: '@favorites',
   dict: '@dict',
   plugin: '@plugin',
   setting: '@setting',
 };
-
-export function isManga(item: Manga | undefined | null): item is Manga {
-  if (item) {
-    return true;
-  }
-  return false;
-}
-export function isChapter(item: Chapter | undefined | null): item is Chapter {
-  if (item) {
-    return true;
-  }
-  return false;
-}
 
 export function scaleToFill(
   img: { width: number; height: number },
@@ -62,7 +55,7 @@ export function* raceTimeout(fn: Effect, ms: number = 5000) {
   });
 
   if (timeout) {
-    return { error: new Error('Timeouts') };
+    return { error: new Error(ErrorMessage.Timeout) };
   }
 
   return { result };
@@ -86,7 +79,137 @@ export function fixDictShape(dict: RootState['dict']): RootState['dict'] {
     if (!Array.isArray(manga.tag)) {
       manga.tag = [];
     }
+    if (!nonNullable(manga.history)) {
+      manga.history = {};
+    }
   }
 
   return dict;
+}
+
+export function fixSettingShape(setting: RootState['setting']): RootState['setting'] {
+  if (!nonNullable(setting.firstPrehandle)) {
+    setting.firstPrehandle = true;
+  }
+
+  return setting;
+}
+
+export function getLatestRelease(
+  data: any[]
+): { error: Error; release?: undefined } | { error?: undefined; release?: LatestRelease } {
+  try {
+    if (!data || !Array.isArray(data)) {
+      return { error: new Error(ErrorMessage.WrongDataType) };
+    }
+
+    const latest = data.find((item) => {
+      return compareVersion(item.tag_name, process.env.VERSION);
+    });
+
+    if (!latest) {
+      return { release: undefined };
+    }
+
+    const [, y, m, d] = latest.published_at.match(PATTERN_PUBLISH_TIME) || [];
+    const apk = (latest.assets as any[]).find(
+      (item) => item.content_type === 'application/vnd.android.package-archive'
+    );
+    const ipa = (latest.assets as any[]).find(
+      (item) => item.content_type === 'application/octet-stream'
+    );
+
+    return {
+      release: {
+        url: latest.html_url,
+        version: latest.tag_name,
+        changeLog: latest.body,
+        publishTime: `${y}-${m}-${d}`,
+        file: {
+          apk: {
+            size: apk.size,
+            downloadUrl: apk.browser_download_url,
+          },
+          ipa: {
+            size: ipa.size,
+            downloadUrl: ipa.browser_download_url,
+          },
+        },
+      },
+    };
+  } catch {
+    return { error: new Error(ErrorMessage.Unknown) };
+  }
+}
+
+export function compareVersion(prev: string, current: string) {
+  const [, A1 = 0, B1 = 0, C1 = 0] = prev.match(PATTERN_VERSION) || [];
+  const [, A2 = 0, B2 = 0, C2 = 0] = current.match(PATTERN_VERSION) || [];
+
+  if (Number(A1) > Number(A2)) {
+    return true;
+  } else if (Number(A1) === Number(A2) && Number(B1) > Number(B2)) {
+    return true;
+  } else if (Number(A1) === Number(A2) && Number(B1) === Number(B2) && Number(C1) > Number(C2)) {
+    return true;
+  }
+
+  return false;
+}
+
+export function mergeQuery(uri: string, key: string, value: string) {
+  const { url, query } = queryString.parseUrl(uri);
+
+  return queryString.stringifyUrl({ url, query: { ...query, [key]: value } });
+}
+
+export function AESDecrypt(contentKey: string): string {
+  const a = contentKey.substring(0x0, 0x10);
+  const b = contentKey.substring(0x10, contentKey.length);
+
+  const c = CryptoJS.enc.Utf8.parse('xxxmanga.woo.key');
+  const d = CryptoJS.enc.Utf8.parse(a);
+
+  const e = CryptoJS.enc.Hex.parse(b);
+  const f = CryptoJS.enc.Base64.stringify(e);
+
+  return CryptoJS.AES.decrypt(f, c, {
+    iv: d,
+    mode: CryptoJS.mode.CBC,
+    padding: CryptoJS.pad.Pkcs7,
+  })
+    .toString(CryptoJS.enc.Utf8)
+    .toString();
+}
+
+export function matchRestoreShape(data: any): data is BackupData {
+  if (
+    typeof data === 'object' &&
+    typeof data.createTime === 'number' &&
+    data.favorites.findIndex((item: any) => typeof item !== 'string') === -1
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+export function nonNullable<T>(v: T | null | undefined): v is T {
+  return v !== null && v !== undefined;
+}
+
+export function splitWidth({
+  width = Dimensions.get('window').width,
+  gap = 0,
+  maxPartWidth = 210,
+  minNumColumns = 3,
+}: {
+  gap?: number;
+  width?: number;
+  maxPartWidth?: number;
+  minNumColumns?: number;
+}) {
+  const numColumns = Math.max(Math.floor(width / maxPartWidth), minNumColumns);
+  const partWidth = (width - gap * (numColumns + 1)) / numColumns;
+  return { width, gap, partWidth, numColumns };
 }

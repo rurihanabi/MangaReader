@@ -1,18 +1,32 @@
 import React from 'react';
-import { Center, Icon, IconButton } from 'native-base';
-import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import { ColorType, SizeType, SafeAreaProps } from 'native-base/lib/typescript/components/types';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
+import { Center } from 'native-base';
+import VectorIcon from '~/components/VectorIcon';
 
-interface ErrorWithRetryProps {
+interface ErrorWithRetryProps extends SafeAreaProps {
+  color?: ColorType;
+  height?: SizeType;
   onRetry?: () => void;
 }
 
-const ErrorWithRetry = ({ onRetry }: ErrorWithRetryProps) => {
+const ErrorWithRetry = ({
+  color = 'white',
+  height = 48,
+  onRetry,
+  ...safeAreaProps
+}: ErrorWithRetryProps) => {
+  const singleTap = Gesture.Tap()
+    .runOnJS(true)
+    .onStart(() => {
+      onRetry && onRetry();
+    });
+
   return (
-    <Center w="full" h="full" bg="black">
-      <IconButton
-        icon={<Icon as={MaterialIcons} name="replay" size={30} color="white" />}
-        onPress={onRetry}
-      />
+    <Center w="full" h={height} bg="transparent" {...safeAreaProps}>
+      <GestureDetector gesture={singleTap}>
+        <VectorIcon name="replay" size="2xl" color={color} />
+      </GestureDetector>
     </Center>
   );
 };

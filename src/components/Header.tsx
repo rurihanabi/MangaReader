@@ -1,11 +1,16 @@
 import React, { Fragment, useMemo } from 'react';
-import { StatusBar, HStack, IconButton, Icon, Text } from 'native-base';
+import { StatusBar, HStack, Text, useTheme } from 'native-base';
 import { NativeStackHeaderProps } from '@react-navigation/native-stack';
 import { getHeaderTitle } from '@react-navigation/elements';
-import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import VectorIcon from '~/components/VectorIcon';
+import Shake from '~/components/Shake';
 
-const Header = (headerProps: NativeStackHeaderProps) => {
-  const { navigation, options, route } = headerProps;
+interface HeaderProps extends NativeStackHeaderProps {
+  enableShake?: boolean;
+}
+
+const Header = ({ navigation, options, route, enableShake = false }: HeaderProps) => {
+  const { colors } = useTheme();
   const title = getHeaderTitle(options, route.name);
   const canGoBack = useMemo(() => navigation.canGoBack(), [navigation]);
 
@@ -23,7 +28,7 @@ const Header = (headerProps: NativeStackHeaderProps) => {
 
   return (
     <Fragment>
-      <StatusBar animated backgroundColor="black" barStyle="light-content" />
+      <StatusBar animated backgroundColor={colors.purple[500]} barStyle="light-content" />
       <HStack
         bg="purple.500"
         p={1}
@@ -36,26 +41,17 @@ const Header = (headerProps: NativeStackHeaderProps) => {
       >
         <HStack flex={1} flexGrow={1} justifyContent="flex-start" alignItems="center">
           {canGoBack ? (
-            <IconButton
-              icon={<Icon as={MaterialIcons} name="arrow-back" size={30} color="white" />}
-              onPress={handleBack}
-            />
+            <VectorIcon name="arrow-back" size="2xl" onPress={handleBack} />
           ) : (
-            <IconButton
-              icon={
-                <Icon
-                  as={MaterialIcons}
-                  name="home"
-                  size={30}
-                  color="white"
-                  onPress={handleAbout}
-                />
-              }
-            />
+            <Shake enable={enableShake}>
+              <VectorIcon name="home" size="2xl" onPress={handleAbout} />
+            </Shake>
           )}
-          <Text maxW="5/6" color="white" fontSize={25} fontWeight="bold" numberOfLines={1}>
-            {title}
-          </Text>
+          {title !== '' && (
+            <Text flex={1} color="white" fontSize={25} fontWeight="bold" numberOfLines={1}>
+              {title}
+            </Text>
+          )}
           {Left}
         </HStack>
 
