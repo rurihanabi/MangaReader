@@ -30,14 +30,22 @@ export const fetchData = ({
     }
     if (init.method === 'POST') {
       if (body instanceof FormData) {
-        init.headers.append('Content-Type', 'multipart/form-data');
+        if (!init.headers.has('Content-Type')) {
+          init.headers.set('Content-Type', 'multipart/form-data');
+        }
         init.body = body;
       } else {
-        init.headers?.append('Content-Type', 'application/json');
+        if (!init.headers.has('Content-Type')) {
+          init.headers?.set('Content-Type', 'application/json');
+        }
         init.body = JSON.stringify(body);
       }
     }
   }
+
+  const delay = setTimeout(() => {
+    controller.abort();
+  }, timeout);
 
   return new Promise<{ error: Error; data: undefined } | { error: undefined; data: any }>((res) => {
     try {
@@ -59,10 +67,6 @@ export const fetchData = ({
         .finally(() => {
           clearTimeout(delay);
         });
-
-      const delay = setTimeout(() => {
-        controller.abort();
-      }, timeout);
     } catch (error) {
       res({ error: error as Error, data: undefined });
     }

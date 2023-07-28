@@ -1,10 +1,11 @@
+import { defaultPlugin, defaultPluginList } from '~/plugins';
+import { ErrorMessage, LightSwitch } from './enum';
 import { delay, race, Effect } from 'redux-saga/effects';
-import { ErrorMessage } from './enum';
-import { Dimensions } from 'react-native';
+import { Dirs } from 'react-native-file-access';
 import queryString from 'query-string';
 import CryptoJS from 'crypto-js';
 
-export const PATTERN_VERSION = /v?([0-9]+)\.([0-9]+)\.([0-9]+)$/;
+export const PATTERN_VERSION = /v?([0-9]+)\.([0-9]+)\.([0-9]+)/;
 export const PATTERN_PUBLISH_TIME = /([0-9]+)-([0-9]+)-([0-9]+)/;
 export const coverAspectRatio = 2 / 3;
 export const storageKey = {
@@ -12,9 +13,10 @@ export const storageKey = {
   dict: '@dict',
   plugin: '@plugin',
   setting: '@setting',
+  task: '@task',
 };
 
-export function scaleToFill(
+export function aspectFill(
   img: { width: number; height: number },
   container: { width: number; height: number }
 ) {
@@ -31,7 +33,7 @@ export function scaleToFill(
   };
 }
 
-export function scaleToFit(
+export function aspectFit(
   img: { width: number; height: number },
   container: { width: number; height: number }
 ) {
@@ -79,20 +81,87 @@ export function fixDictShape(dict: RootState['dict']): RootState['dict'] {
     if (!Array.isArray(manga.tag)) {
       manga.tag = [];
     }
-    if (!nonNullable(manga.history)) {
-      manga.history = {};
-    }
+  }
+
+  if (!nonNullable(dict.record)) {
+    dict.record = {};
+  }
+  if (!nonNullable(dict.lastWatch)) {
+    dict.lastWatch = {};
   }
 
   return dict;
 }
 
 export function fixSettingShape(setting: RootState['setting']): RootState['setting'] {
-  if (!nonNullable(setting.firstPrehandle)) {
-    setting.firstPrehandle = true;
+  if (!nonNullable(setting.light)) {
+    setting.light = LightSwitch.Off;
+  }
+  if (!nonNullable(setting.androidDownloadPath)) {
+    setting.androidDownloadPath = Dirs.SDCardDir + '/DCIM';
   }
 
   return setting;
+}
+
+export function fixPluginShape(plugin: RootState['plugin']): RootState['plugin'] {
+  if (!nonNullable(plugin.source)) {
+    plugin.source = defaultPlugin;
+  }
+  if (!Array.isArray(plugin.list)) {
+    plugin.list = defaultPluginList;
+  }
+  if (!nonNullable(plugin.extra)) {
+    plugin.extra = {};
+  }
+
+  return plugin;
+}
+
+export function fixTaskShape(task: RootState['task']): RootState['task'] {
+  if (!Array.isArray(task.list)) {
+    task.list = [];
+  }
+  if (nonNullable(task.job)) {
+    task.job = { list: [], max: 5, thread: [] };
+  }
+  if (!Array.isArray(task.job.list)) {
+    task.job.list = [];
+  }
+  if (!Array.isArray(task.job.thread)) {
+    task.job.thread = [];
+  }
+  if (typeof task.job.max !== 'number') {
+    task.job.max = 5;
+  }
+
+  return task;
+}
+
+export function fixRestoreShape(data: BackupData): BackupData {
+  if (!nonNullable || typeof data !== 'object') {
+    data = { createTime: 0, favorites: [], lastWatch: {} };
+  }
+  if (typeof data.createTime !== 'number') {
+    data.createTime = 0;
+  }
+  if (!Array.isArray(data.favorites)) {
+    data.favorites = [];
+  }
+  data.favorites = data.favorites.filter((item: any) => typeof item === 'string');
+  if (typeof data.lastWatch !== 'object') {
+    data.lastWatch = {};
+  }
+  for (let key in data.lastWatch) {
+    const item = data.lastWatch[key];
+    data.lastWatch[key] = {
+      page: item && typeof item.page === 'number' ? item.page : undefined,
+      chapter: item && typeof item.chapter === 'string' ? item.chapter : undefined,
+      title: item && typeof item.title === 'string' ? item.title : undefined,
+    };
+  }
+
+  return data;
 }
 
 export function getLatestRelease(
@@ -126,14 +195,8 @@ export function getLatestRelease(
         changeLog: latest.body,
         publishTime: `${y}-${m}-${d}`,
         file: {
-          apk: {
-            size: apk.size,
-            downloadUrl: apk.browser_download_url,
-          },
-          ipa: {
-            size: ipa.size,
-            downloadUrl: ipa.browser_download_url,
-          },
+          apk: { size: apk.size, downloadUrl: apk.browser_download_url },
+          ipa: { size: ipa.size, downloadUrl: ipa.browser_download_url },
         },
       },
     };
@@ -182,34 +245,22 @@ export function AESDecrypt(contentKey: string): string {
     .toString();
 }
 
-export function matchRestoreShape(data: any): data is BackupData {
-  if (
-    typeof data === 'object' &&
-    typeof data.createTime === 'number' &&
-    data.favorites.findIndex((item: any) => typeof item !== 'string') === -1
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
 export function nonNullable<T>(v: T | null | undefined): v is T {
   return v !== null && v !== undefined;
 }
 
-export function splitWidth({
-  width = Dimensions.get('window').width,
-  gap = 0,
-  maxPartWidth = 210,
-  minNumColumns = 3,
-}: {
-  gap?: number;
-  width?: number;
-  maxPartWidth?: number;
-  minNumColumns?: number;
-}) {
-  const numColumns = Math.max(Math.floor(width / maxPartWidth), minNumColumns);
-  const partWidth = (width - gap * (numColumns + 1)) / numColumns;
-  return { width, gap, partWidth, numColumns };
+export function trycatch<T extends (...args: any) => any>(fn: T): ReturnType<T> {
+  try {
+    return fn();
+  } catch (error) {
+    if (error instanceof Error) {
+      return { error } as ReturnType<T>;
+    } else {
+      return { error: new Error(ErrorMessage.Unknown) } as ReturnType<T>;
+    }
+  }
+}
+
+export function ellipsis(str: string, len: number = 20, suffix = '...') {
+  return str.length > len ? str.substring(0, len) + suffix : str;
 }

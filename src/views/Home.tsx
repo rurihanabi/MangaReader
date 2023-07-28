@@ -25,7 +25,7 @@ const Home = ({ navigation: { navigate } }: StackHomeProps) => {
     [list]
   );
   const negativeList = useMemo(
-    () => list.filter((item) => !item.inQueue).map((item) => item.mangaHash),
+    () => list.filter((item) => !item.enableBatch).map((item) => item.mangaHash),
     [list]
   );
 
@@ -57,9 +57,6 @@ export const SearchAndAbout = () => {
     }, [batchStatus])
   );
 
-  const handleScan = () => {
-    RootNavigation.navigate('Scan');
-  };
   const handleSearch = () => {
     RootNavigation.navigate('Discovery');
   };
@@ -69,7 +66,6 @@ export const SearchAndAbout = () => {
 
   return (
     <HStack flexShrink={0}>
-      <VectorIcon name="qr-code-scanner" onPress={handleScan} />
       <VectorIcon name="search" onPress={handleSearch} />
       <View position="relative">
         <Rotate enable={enableRotate}>

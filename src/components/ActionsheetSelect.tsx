@@ -1,9 +1,17 @@
-import React, { Fragment, FC, memo, ReactNode } from 'react';
-import { Actionsheet, ScrollView } from 'native-base';
+import React, { FC, memo, ReactNode, useEffect } from 'react';
+import { Actionsheet, ScrollView, Icon } from 'native-base';
+import { sourceMap } from './VectorIcon';
+import { Keyboard } from 'react-native';
+import Delay from './Delay';
 
-interface ActionsheetSelectProps {
+export interface ActionsheetSelectProps {
   isOpen?: boolean;
-  options: { label: string; value: string; disabled?: boolean }[];
+  options: {
+    label: string;
+    value: string;
+    disabled?: boolean;
+    icon?: { source: keyof typeof sourceMap; name: string };
+  }[];
   onClose?: () => void;
   onChange?: (value: string) => void;
   headerComponent?: ReactNode;
@@ -16,6 +24,10 @@ const ActionsheetSelect: FC<ActionsheetSelectProps> = ({
   onChange,
   headerComponent,
 }) => {
+  useEffect(() => {
+    isOpen && Keyboard.dismiss();
+  }, [isOpen]);
+
   const handleClose = () => {
     onClose && onClose();
   };
@@ -27,7 +39,7 @@ const ActionsheetSelect: FC<ActionsheetSelectProps> = ({
   };
 
   return (
-    <Fragment>
+    <Delay>
       <Actionsheet isOpen={isOpen} onClose={handleClose}>
         <Actionsheet.Content>
           {headerComponent}
@@ -35,6 +47,11 @@ const ActionsheetSelect: FC<ActionsheetSelectProps> = ({
             {options.map((item) => (
               <Actionsheet.Item
                 key={item.value}
+                startIcon={
+                  item.icon ? (
+                    <Icon as={sourceMap[item.icon.source]} size="md" name={item.icon.name} />
+                  ) : undefined
+                }
                 disabled={item.disabled}
                 onPress={handleChange(item.value)}
               >
@@ -44,7 +61,7 @@ const ActionsheetSelect: FC<ActionsheetSelectProps> = ({
           </ScrollView>
         </Actionsheet.Content>
       </Actionsheet>
-    </Fragment>
+    </Delay>
   );
 };
 

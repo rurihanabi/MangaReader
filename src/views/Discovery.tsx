@@ -4,6 +4,7 @@ import { action, useAppSelector, useAppDispatch } from '~/redux';
 import { useRoute, useFocusEffect, RouteProp } from '@react-navigation/native';
 import { nonNullable, AsyncStatus } from '~/utils';
 import { Plugin, PluginMap } from '~/plugins';
+import { Keyboard } from 'react-native';
 import ActionsheetSelect from '~/components/ActionsheetSelect';
 import VectorIcon from '~/components/VectorIcon';
 import Bookshelf from '~/components/Bookshelf';
@@ -28,6 +29,9 @@ const Discovery = ({ navigation: { navigate } }: StackDiscoveryProps) => {
     }, [dispatch, loadStatus, source])
   );
 
+  const handleReload = useCallback(() => {
+    dispatch(loadDiscovery({ source, isReset: true }));
+  }, [dispatch, source]);
   const handleLoadMore = useCallback(() => {
     dispatch(loadDiscovery({ source }));
   }, [dispatch, source]);
@@ -43,6 +47,7 @@ const Discovery = ({ navigation: { navigate } }: StackDiscoveryProps) => {
       <SearchOption />
       <Bookshelf
         list={updateList}
+        reload={handleReload}
         loadMore={handleLoadMore}
         itemOnPress={handleDetail}
         loading={loadStatus === AsyncStatus.Pending}
@@ -53,8 +58,8 @@ const Discovery = ({ navigation: { navigate } }: StackDiscoveryProps) => {
 
 export const SearchOption = () => {
   const dispatch = useAppDispatch();
-  const { source } = useAppSelector((state) => state.plugin);
-  const { filter } = useAppSelector((state) => state.discovery);
+  const source = useAppSelector((state) => state.plugin.source);
+  const filter = useAppSelector((state) => state.discovery.filter);
   const { isOpen, onOpen, onClose } = useDisclose();
   const [key, setKey] = useState<string>('');
   const [options, setOptions] = useState<OptionItem[]>([]);
@@ -88,7 +93,7 @@ export const SearchOption = () => {
   }
 
   return (
-    <HStack px={2} pb={2} bg="purple.500">
+    <HStack safeAreaX px={2} pb={2} bg="purple.500">
       {discoveryOptions.map((item) => {
         return (
           <Button
@@ -155,9 +160,13 @@ export const PluginSelect = () => {
         p={0}
         mr={1}
         w={12}
+        h={12}
         variant="ghost"
         _text={{ color: 'white', textAlign: 'center', fontSize: 'sm', fontWeight: 'bold' }}
-        onPress={handleOpen}
+        onPress={() => {
+          handleOpen();
+          Keyboard.dismiss();
+        }}
       >
         {pluginLabel}
       </Button>

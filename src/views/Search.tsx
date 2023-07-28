@@ -29,6 +29,9 @@ const Search = ({ route, navigation }: StackSearchProps) => {
     dispatch(loadSearch({ keyword, source, isReset: true }));
   }, [dispatch, keyword, source]);
 
+  const handleReload = useCallback(() => {
+    dispatch(loadSearch({ keyword, source, isReset: true }));
+  }, [dispatch, keyword, source]);
   const handleLoadMore = useCallback(() => {
     dispatch(loadSearch({ keyword, source }));
   }, [dispatch, keyword, source]);
@@ -44,6 +47,7 @@ const Search = ({ route, navigation }: StackSearchProps) => {
       <SearchOption />
       <Bookshelf
         list={searchList}
+        reload={handleReload}
         loadMore={handleLoadMore}
         itemOnPress={handleDetail}
         loading={loadStatus === AsyncStatus.Pending}
@@ -56,7 +60,8 @@ export const SearchOption = () => {
   const route = useRoute<RouteProp<RootStackParamList, 'Search'>>();
   const source = route.params.source;
   const dispatch = useAppDispatch();
-  const { keyword, filter } = useAppSelector((state) => state.search);
+  const filter = useAppSelector((state) => state.search.filter);
+  const keyword = useAppSelector((state) => state.search.keyword);
   const { isOpen, onOpen, onClose } = useDisclose();
   const [key, setKey] = useState<string>('');
   const [options, setOptions] = useState<OptionItem[]>([]);
@@ -90,7 +95,7 @@ export const SearchOption = () => {
   }
 
   return (
-    <HStack px={2} pb={2} bg="purple.500">
+    <HStack safeAreaX px={2} pb={2} bg="purple.500">
       {searchOptions.map((item) => {
         return (
           <Button

@@ -1,19 +1,15 @@
-import React, { memo } from 'react';
-import { Box, Text, Icon, FlatList, Pressable } from 'native-base';
-import { splitWidth, coverAspectRatio } from '~/utils';
+import React, { memo, useMemo } from 'react';
+import { useDelayRender, useSplitWidth } from '~/hooks';
+import { Box, Text, Icon, Pressable } from 'native-base';
+import { Keyboard, StyleSheet } from 'react-native';
+import { coverAspectRatio } from '~/utils';
 import { CachedImage } from '@georstat/react-native-image-cache';
-import { StyleSheet } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import WhiteCurtain from '~/components/WhiteCurtain';
 import SpinLoading from '~/components/SpinLoading';
 import Loading from '~/components/Loading';
 import Empty from '~/components/Empty';
-
-const { gap, partWidth, numColumns } = splitWidth({
-  gap: 8,
-  minNumColumns: 3,
-  maxPartWidth: 200,
-});
 
 interface BookshelfProps {
   list: Manga[];
@@ -21,6 +17,7 @@ interface BookshelfProps {
   activeList?: string[];
   negativeList?: string[];
   loadMore?: () => void;
+  reload?: () => void;
   itemOnPress: (hash: string) => void;
   loading?: boolean;
   emptyText?: string;
@@ -32,10 +29,27 @@ const Bookshelf = ({
   activeList,
   negativeList,
   loadMore,
+  reload,
   itemOnPress,
   loading = false,
   emptyText,
 }: BookshelfProps) => {
+  const { gap, insets, splitWidth, numColumns, windowWidth, windowHeight } = useSplitWidth({
+    gap: 8,
+    minNumColumns: 3,
+    maxSplitWidth: 180,
+  });
+  const render = useDelayRender(loading && list.length === 0);
+  const extraData = useMemo(
+    () => ({
+      width: splitWidth,
+      trend: trendList || [],
+      active: activeList || [],
+      negative: negativeList || [],
+    }),
+    [splitWidth, activeList, trendList, negativeList]
+  );
+
   const handlePress = (hash: string) => {
     return () => {
       itemOnPress(hash);
@@ -45,38 +59,43 @@ const Bookshelf = ({
     !loading && loadMore && loadMore();
   };
 
-  if (loading && list.length === 0) {
+  if ((loading && list.length === 0) || !render) {
     return <Loading />;
   }
   if (!loading && list.length === 0) {
-    return <Empty text={emptyText} />;
+    return <Empty text={emptyText} onPress={reload} />;
   }
 
   return (
-    <FlatList
-      p={`${gap / 2}px`}
-      numColumns={numColumns}
+    <FlashList
       data={list}
+      extraData={extraData}
+      numColumns={numColumns}
+      estimatedItemSize={splitWidth / coverAspectRatio}
+      estimatedListSize={{ width: windowWidth, height: windowHeight }}
+      contentContainerStyle={{
+        padding: gap / 2,
+        paddingLeft: gap / 2 + insets.left,
+        paddingRight: gap / 2 + insets.right,
+      }}
+      onScroll={Keyboard.dismiss}
       onEndReached={handleEndReached}
       onEndReachedThreshold={1}
-      windowSize={3}
-      initialNumToRender={12}
-      maxToRenderPerBatch={12}
       keyExtractor={(item) => item.hash}
       ListFooterComponent={
         loading ? <SpinLoading height={24} safeAreaBottom /> : <Box height={0} safeAreaBottom />
       }
-      renderItem={({ item }) => (
+      renderItem={({ item, extraData: { width, active, trend, negative } }) => (
         <Pressable _pressed={{ opacity: 0.8 }} onPress={handlePress(item.hash)}>
-          <Box width={partWidth + gap} flexDirection="column" p={`${gap / 2}px`}>
+          <Box width={width + gap} flexDirection="column" p={`${gap / 2}px`}>
             <Box position="relative" shadow={0} bg="white" borderRadius={6}>
               <CachedImage
                 options={{ headers: item.headers }}
-                source={item.cover}
-                style={styles.img}
+                source={item.bookCover || item.infoCover || item.cover || ''}
+                style={{ ...styles.img, height: width / coverAspectRatio }}
                 resizeMode="cover"
               />
-              {trendList && trendList.includes(item.hash) && (
+              {trend.includes(item.hash) && (
                 <Box
                   shadow={0}
                   position="absolute"
@@ -92,7 +111,7 @@ const Bookshelf = ({
                   </Text>
                 </Box>
               )}
-              {negativeList && negativeList.includes(item.hash) && (
+              {negative.includes(item.hash) && (
                 <Icon
                   shadow="icon"
                   position="absolute"
@@ -104,7 +123,7 @@ const Bookshelf = ({
                   color="purple.700"
                 />
               )}
-              <WhiteCurtain actived={activeList && activeList.includes(item.hash)}>
+              <WhiteCurtain actived={active.includes(item.hash)}>
                 <Box
                   position="absolute"
                   w="full"
@@ -130,7 +149,6 @@ const Bookshelf = ({
 const styles = StyleSheet.create({
   img: {
     width: '100%',
-    height: partWidth / coverAspectRatio,
     overflow: 'hidden',
     borderRadius: 6,
   },

@@ -20,19 +20,10 @@ export enum MangaStatus {
 }
 
 /**
- * @description enum of nodejs env
+ * @description enum layoutmode of Reader component
  * @enum {number}
  */
-export enum env {
-  DEV = 'development',
-  PROD = 'production',
-}
-
-/**
- * @description enum mode of Reader component
- * @enum {number}
- */
-export enum ReaderMode {
+export enum LayoutMode {
   Horizontal = 'horizontal',
   Vertical = 'vertical',
 }
@@ -57,6 +48,8 @@ export enum ErrorMessage {
   CookieInvalid = 'Cookie失效，请重新获取',
   WithoutPermission = '授权失败',
   IOSNotSupportWebp = '暂不支持.webp格式下载',
+  TokenInvalid = 'Token失效，请重新获取',
+  PushTaskFail = '推送任务失败',
 }
 
 export enum Orientation {
@@ -70,12 +63,52 @@ export enum BackupRestore {
   Picture = 'Picture',
 }
 
-export enum PrefetchDownload {
-  Prefetch = 'prefetch',
+export enum ChapterOptions {
+  Multiple = 'multiple',
   Download = 'download',
+  Export = 'export',
 }
 
 export enum Sequence {
   Asc = 'Asc',
   Desc = 'Desc',
+}
+
+export enum Volume {
+  Up = 'Up',
+  Down = 'Down',
+}
+
+export enum LightSwitch {
+  Off = 'Off',
+  On = 'On',
+}
+
+export enum TaskType {
+  Download,
+  Export,
+}
+
+export enum PositionX {
+  Left,
+  Mid,
+  Right,
+}
+
+export enum PositionY {
+  Top,
+  Mid,
+  Bottom,
+}
+
+export enum PositionXY {
+  TopLeft,
+  TopMid,
+  TopRight,
+  MidLeft,
+  Center,
+  MidRight,
+  BottomLeft,
+  BottomMid,
+  BottomRight,
 }

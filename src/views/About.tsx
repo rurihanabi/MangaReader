@@ -12,44 +12,55 @@ import {
   useDisclose,
 } from 'native-base';
 import { action, useAppSelector, useAppDispatch } from '~/redux';
-import { env, AsyncStatus, BackupRestore } from '~/utils';
+import { AsyncStatus, BackupRestore } from '~/utils';
 import { CacheManager } from '@georstat/react-native-image-cache';
-import { Linking } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import ActionsheetSelect from '~/components/ActionsheetSelect';
 import ErrorWithRetry from '~/components/ErrorWithRetry';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import SpinLoading from '~/components/SpinLoading';
-import QrcodeModal from '~/components/QrcodeModal';
+import PathModal from '~/components/PathModal';
 import Clipboard from '@react-native-clipboard/clipboard';
 import LZString from 'lz-string';
 
-const { restore, clearCache, loadLatestRelease } = action;
+const { restore, clearCache, loadLatestRelease, setAndroidDownloadPath } = action;
 const christmasGif = require('~/assets/christmas.gif');
-const BackupRestoreOptions = [
-  { label: '剪贴板', value: BackupRestore.Clipboard },
-  { label: '二维码', value: BackupRestore.Qrcode },
-];
+const BackupRestoreOptions = [{ label: '剪贴板', value: BackupRestore.Clipboard }];
 
-const About = ({ navigation }: StackAboutProps) => {
+const About = () => {
   const toast = useToast();
   const { isOpen: isClearing, onOpen: openClearing, onClose: closeClearing } = useDisclose();
   const { isOpen: isModalOpen, onOpen: onModalOpen, onClose: onModalClose } = useDisclose();
-  const { isOpen: isQrcodeOpen, onOpen: onQrcodeOpen, onClose: onQrcodeClose } = useDisclose();
   const { isOpen: isBackupOpen, onOpen: onBackupOpen, onClose: onBackupClose } = useDisclose();
   const { isOpen: isRestoreOpen, onOpen: onRestoreOpen, onClose: onRestoreClose } = useDisclose();
+  const {
+    isOpen: isAlbumPathOpen,
+    onOpen: onAlbumPathOpen,
+    onClose: onAlbumPathClose,
+  } = useDisclose();
   const dispatch = useAppDispatch();
   const release = useAppSelector((state) => state.release);
   const favorites = useAppSelector((state) => state.favorites);
+  const lastWatch = useAppSelector((state) => state.dict.lastWatch);
   const clearStatus = useAppSelector((state) => state.datasync.clearStatus);
   const restoreStatus = useAppSelector((state) => state.datasync.restoreStatus);
+  const androidDownloadPath = useAppSelector((state) => state.setting.androidDownloadPath);
 
   const compressed = useMemo(() => {
+    const hashList = favorites.map((item) => item.mangaHash);
+    const savedLastWatch: typeof lastWatch = {};
+    for (let hash in lastWatch) {
+      if (hashList.includes(hash)) {
+        savedLastWatch[hash] = lastWatch[hash];
+      }
+    }
     const uncompressed = JSON.stringify({
       createTime: new Date().getTime(),
-      favorites: favorites.map((item) => item.mangaHash),
+      favorites: hashList,
+      lastWatch: savedLastWatch,
     });
     return LZString.compressToBase64(uncompressed);
-  }, [favorites]);
+  }, [favorites, lastWatch]);
 
   const handleRetry = () => {
     dispatch(loadLatestRelease());
@@ -60,9 +71,6 @@ const About = ({ navigation }: StackAboutProps) => {
       Clipboard.setString(compressed);
       toast.show({ title: '复制成功' });
     }
-    if (value === BackupRestore.Qrcode) {
-      onQrcodeOpen();
-    }
   };
   const handleRestoreChange = (value: string) => {
     if (value === BackupRestore.Clipboard) {
@@ -71,9 +79,6 @@ const About = ({ navigation }: StackAboutProps) => {
           Clipboard.getString().then((data) => dispatch(restore(data)));
         }
       });
-    }
-    if (value === BackupRestore.Qrcode) {
-      navigation.navigate('Scan');
     }
   };
 
@@ -103,6 +108,11 @@ const About = ({ navigation }: StackAboutProps) => {
     onModalClose();
   };
 
+  const handleAlbumPathClose = (path: string) => {
+    onAlbumPathClose();
+    dispatch(setAndroidDownloadPath(path));
+  };
+
   return (
     <ScrollView>
       <VStack space={6} px={6} py={8} safeAreaBottom>
@@ -121,7 +131,15 @@ const About = ({ navigation }: StackAboutProps) => {
         )}
         {release.loadStatus === AsyncStatus.Fulfilled && release.latest === undefined && (
           <Center alignItems="center">
-            <Image w={24} h={32} resizeMode="contain" source={christmasGif} alt="christmas" />
+            <Image
+              w={24}
+              h={32}
+              resizeMode="contain"
+              resizeMethod="resize"
+              fadeDuration={0}
+              source={christmasGif}
+              alt="christmas"
+            />
             <Text pb={4} fontWeight="bold">
               暂无更新
             </Text>
@@ -172,6 +190,16 @@ const About = ({ navigation }: StackAboutProps) => {
         >
           恢复
         </Button>
+        {(Platform.OS === 'android' || __DEV__) && (
+          <Button
+            shadow={2}
+            _text={{ fontWeight: 'bold' }}
+            leftIcon={<Icon as={MaterialIcons} name="drive-file-move" size="lg" />}
+            onPress={onAlbumPathOpen}
+          >
+            {`${androidDownloadPath}`}
+          </Button>
+        )}
         <Button
           shadow={2}
           isLoading={isClearing}
@@ -182,7 +210,7 @@ const About = ({ navigation }: StackAboutProps) => {
         >
           清除图片缓存
         </Button>
-        {process.env.NODE_ENV === env.DEV && (
+        {__DEV__ && (
           <Button
             shadow={2}
             isLoading={clearStatus === AsyncStatus.Pending}
@@ -202,7 +230,7 @@ const About = ({ navigation }: StackAboutProps) => {
         options={BackupRestoreOptions}
         onChange={handleBackupChange}
         headerComponent={
-          <Text w="full" pl={4} color="gray.500" fontSize={16}>
+          <Text w="full" pl={4} pb={4} color="gray.500" fontSize={16}>
             备份
           </Text>
         }
@@ -213,12 +241,12 @@ const About = ({ navigation }: StackAboutProps) => {
         options={BackupRestoreOptions}
         onChange={handleRestoreChange}
         headerComponent={
-          <Text w="full" pl={4} color="gray.500" fontSize={16}>
+          <Text w="full" pl={4} pb={4} color="gray.500" fontSize={16}>
             恢复
           </Text>
         }
       />
-      <Modal size="xl" isOpen={isModalOpen} onClose={onModalClose}>
+      <Modal useRNModal size="xl" isOpen={isModalOpen} onClose={onModalClose}>
         <Modal.Content>
           <Modal.Header>警告</Modal.Header>
           <Modal.Body>此操作会清空收藏列表、漫画数据、插件和观看设置，请谨慎！</Modal.Body>
@@ -235,7 +263,11 @@ const About = ({ navigation }: StackAboutProps) => {
         </Modal.Content>
       </Modal>
 
-      <QrcodeModal isOpen={isQrcodeOpen} value={compressed} onClose={onQrcodeClose} />
+      <PathModal
+        isOpen={isAlbumPathOpen}
+        defaultValue={androidDownloadPath}
+        onClose={handleAlbumPathClose}
+      />
     </ScrollView>
   );
 };

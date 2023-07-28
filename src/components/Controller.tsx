@@ -6,24 +6,23 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import { Dimensions } from 'react-native';
-import { Box } from 'native-base';
+import { useWindowDimensions } from 'react-native';
+import { PositionX } from '~/utils';
 
 const doubleTapScaleValue = 2;
-const windowWidth = Dimensions.get('window').width;
-const windowHeight = Dimensions.get('window').height;
-const oneThirdWidth = windowWidth / 3;
-const oneTwoWidth = windowWidth / 2;
 
-interface ControllerProps {
-  onTap?: (position: 'left' | 'mid' | 'right') => void;
-  onLongPress?: (positoin: 'left' | 'right') => void;
+export interface ControllerProps {
+  onTap?: (position: PositionX) => void;
+  onLongPress?: (position: PositionX) => void;
   children: ReactNode;
   horizontal?: boolean;
 }
 
 const Controller = ({ onTap, children, horizontal = false, onLongPress }: ControllerProps) => {
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [enabled, setEnabled] = useState(false);
+  const oneThirdWidth = windowWidth / 3;
+
   const width = useSharedValue(windowWidth);
   const height = useSharedValue(windowHeight);
 
@@ -42,6 +41,8 @@ const Controller = ({ onTap, children, horizontal = false, onLongPress }: Contro
   const savedScale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
+    width: windowWidth,
+    height: windowHeight,
     transform: [
       { translateX: translationX.value },
       { translateY: translationY.value },
@@ -56,14 +57,14 @@ const Controller = ({ onTap, children, horizontal = false, onLongPress }: Contro
     .onStart((e) => {
       if (savedScale.value === 1 && horizontal) {
         if (e.x < oneThirdWidth) {
-          onTap && onTap('left');
+          onTap && onTap(PositionX.Left);
         } else if (e.x < oneThirdWidth * 2) {
-          onTap && onTap('mid');
+          onTap && onTap(PositionX.Mid);
         } else {
-          onTap && onTap('right');
+          onTap && onTap(PositionX.Right);
         }
       } else {
-        onTap && onTap('mid');
+        onTap && onTap(PositionX.Mid);
       }
     });
   const doubleTap = Gesture.Tap()
@@ -102,13 +103,15 @@ const Controller = ({ onTap, children, horizontal = false, onLongPress }: Contro
     });
   const longPress = Gesture.LongPress()
     .runOnJS(true)
-    .minDuration(2000)
+    .minDuration(1000)
     .onStart((e) => {
-      if (onLongPress) {
-        if (e.x < oneTwoWidth) {
-          onLongPress('left');
+      if (savedScale.value === 1 && onLongPress) {
+        if (e.x < oneThirdWidth) {
+          onLongPress(PositionX.Left);
+        } else if (e.x < oneThirdWidth * 2) {
+          onLongPress(PositionX.Mid);
         } else {
-          onLongPress('right');
+          onLongPress(PositionX.Right);
         }
       }
     });
@@ -152,6 +155,8 @@ const Controller = ({ onTap, children, horizontal = false, onLongPress }: Contro
       runOnJS(setEnabled)(scale.value > 1);
     });
   const panGesture = Gesture.Pan()
+    .minPointers(1)
+    .maxPointers(1)
     .enabled(enabled)
     .onChange((e) => {
       'worklet';
@@ -187,13 +192,7 @@ const Controller = ({ onTap, children, horizontal = false, onLongPress }: Contro
     <GestureDetector gesture={Gesture.Exclusive(doubleTap, singleTap, longPress)}>
       <GestureDetector gesture={pinchGesture}>
         <GestureDetector gesture={panGesture}>
-          {horizontal ? (
-            <Box w={windowWidth} h={windowHeight} safeArea>
-              <Animated.View style={animatedStyle}>{children}</Animated.View>
-            </Box>
-          ) : (
-            <Animated.View style={animatedStyle}>{children}</Animated.View>
-          )}
+          <Animated.View style={animatedStyle}>{children}</Animated.View>
         </GestureDetector>
       </GestureDetector>
     </GestureDetector>

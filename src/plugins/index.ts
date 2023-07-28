@@ -8,22 +8,22 @@ import JMC from './jmc';
 import MHM from './mhm';
 import KL from './kl';
 import NH from './nh';
+import PICA from './pica';
 
 export * from './base';
 
 export const PluginMap = new Map<Plugin, Base>([
-  [DMZJ.id, DMZJ],
   [COPY.id, COPY],
-  [MHDB.id, MHDB],
-  [MHG.id, MHG],
   [MHGM.id, MHGM],
   [JMC.id, JMC],
-  [MHM.id, MHM],
-  [KL.id, KL],
   [NH.id, NH],
+  [PICA.id, PICA],
+  [DMZJ.id, DMZJ],
+  [KL.id, KL],
+  [MHDB.id, MHDB],
+  [MHM.id, MHM],
+  [MHG.id, MHG],
 ]);
-export const isJMC = JMC.is;
-export const nHentaiUserAgent = NH.userAgent;
 export const combineHash = Base.combineHash;
 export const splitHash = Base.splitHash;
 export const defaultPlugin: Plugin = PluginMap.entries().next().value[0];
@@ -37,5 +37,6 @@ export const defaultPluginList = Array.from(PluginMap.values()).map((item) => {
     userAgent: item.userAgent,
     description: item.description,
     disabled: item.disabled,
+    injectedJavaScript: item.injectedJavaScript,
   };
 });

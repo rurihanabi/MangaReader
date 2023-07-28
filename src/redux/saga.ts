@@ -16,18 +16,23 @@ import {
   fetchData,
   haveError,
   fixDictShape,
+  fixPluginShape,
   fixSettingShape,
+  fixTaskShape,
+  fixRestoreShape,
   getLatestRelease,
-  matchRestoreShape,
+  trycatch,
   nonNullable,
   ErrorMessage,
   AsyncStatus,
+  TaskType,
 } from '~/utils';
 import { nanoid, Action, PayloadAction } from '@reduxjs/toolkit';
 import { Permission, PermissionsAndroid, Platform } from 'react-native';
 import { splitHash, PluginMap } from '~/plugins';
 import { CacheManager } from '@georstat/react-native-image-cache';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
+import { FileSystem } from 'react-native-file-access';
 import { action } from './slice';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import LZString from 'lz-string';
@@ -37,7 +42,6 @@ const {
   launch,
   launchCompletion,
   toastMessage,
-  catchError,
   // datasync
   syncData,
   syncDataCompletion,
@@ -50,11 +54,14 @@ const {
   loadLatestReleaseCompletion,
   // setting
   setMode,
+  setLight,
   setDirection,
   setSequence,
+  setAndroidDownloadPath,
   syncSetting,
   // plugin
   setSource,
+  setExtra,
   disablePlugin,
   syncPlugin,
   // batch
@@ -73,8 +80,9 @@ const {
   // favorites
   addFavorites,
   removeFavorites,
-  pushQueque,
-  popQueue,
+  enabledBatch,
+  disabledBatch,
+  viewFavorites,
   syncFavorites,
   // manga
   loadManga,
@@ -86,11 +94,19 @@ const {
   // chapter
   loadChapter,
   loadChapterCompletion,
-  prehandleChapter,
-  prehandleChapterCompletion,
-  addPrehandleLog,
-  updatePrehandleLog,
-  setPrehandleLogStatus,
+  downloadChapter,
+  exportChapter,
+  saveImage,
+  // task
+  restartTask,
+  retryTask,
+  pushTask,
+  removeTask,
+  finishTask,
+  startJob,
+  endJob,
+  finishJob,
+  syncTask,
   // dict
   viewChapter,
   viewPage,
@@ -101,46 +117,67 @@ const {
 function* initSaga() {
   yield put(launch());
 }
-
 function* launchSaga() {
-  yield takeLatest(launch.type, function* () {
+  yield takeLatestSuspense(launch.type, function* () {
     yield put(syncData());
     yield take(syncDataCompletion.type);
+    yield put(restartTask());
     yield put(loadLatestRelease());
 
     yield put(launchCompletion({ error: undefined }));
   });
 }
 
+function* pluginSyncDataSaga() {
+  yield takeLatestSuspense(
+    setExtra.type,
+    function* ({ payload: { source } }: ReturnType<typeof setExtra>) {
+      const extra = ((state: RootState) => state.plugin.extra)(yield select());
+      const plugin = PluginMap.get(source);
+
+      if (!plugin) {
+        yield put(toastMessage(ErrorMessage.PluginMissing));
+        return;
+      }
+
+      const message = plugin.syncExtraData(extra);
+      if (typeof message === 'string') {
+        yield put(toastMessage(message));
+      }
+    }
+  );
+}
+
 function* syncDataSaga() {
-  yield takeLatest(syncData.type, function* () {
+  yield takeLatestSuspense(syncData.type, function* () {
     try {
       const favoritesData: string | null = yield call(AsyncStorage.getItem, storageKey.favorites);
       const dictData: string | null = yield call(AsyncStorage.getItem, storageKey.dict);
       const pluginData: string | null = yield call(AsyncStorage.getItem, storageKey.plugin);
       const settingData: string | null = yield call(AsyncStorage.getItem, storageKey.setting);
+      const taskData: string | null = yield call(AsyncStorage.getItem, storageKey.task);
 
       if (favoritesData) {
         const favorites: RootState['favorites'] = JSON.parse(favoritesData);
         yield put(
           syncFavorites(
             favorites.map((item) =>
-              item.inQueue === undefined ? { ...item, inQueue: true } : item
+              item.enableBatch === undefined ? { ...item, enableBatch: true } : item
             )
           )
         );
       }
       if (dictData) {
-        const dict: RootState['dict'] = JSON.parse(dictData);
-        yield put(syncDict(fixDictShape(dict)));
+        const dict: RootState['dict'] = fixDictShape(JSON.parse(dictData));
+        yield put(syncDict(dict));
       }
       if (pluginData) {
-        const pluginCache: RootState['plugin'] = JSON.parse(pluginData);
+        const plugin: RootState['plugin'] = fixPluginShape(JSON.parse(pluginData));
         const list: RootState['plugin']['list'] = [];
 
         PluginMap.forEach((item) => {
-          const finded = pluginCache.list.find((obj) => obj.value === item.id);
-
+          const finded = plugin.list.find((obj) => obj.value === item.id);
+          item.syncExtraData(plugin.extra);
           list.push({
             name: item.name,
             label: item.shortName,
@@ -149,19 +186,19 @@ function* syncDataSaga() {
             href: item.href,
             userAgent: item.userAgent,
             description: item.description,
+            injectedJavaScript: item.injectedJavaScript,
             disabled: finded ? finded.disabled : true,
           });
         });
-        yield put(
-          syncPlugin({
-            source: pluginCache.source,
-            list,
-          })
-        );
+        yield put(syncPlugin({ ...plugin, list }));
       }
       if (settingData) {
-        const setting: RootState['setting'] = JSON.parse(settingData);
-        yield put(syncSetting(fixSettingShape(setting)));
+        const setting: RootState['setting'] = fixSettingShape(JSON.parse(settingData));
+        yield put(syncSetting(setting));
+      }
+      if (taskData) {
+        const task: RootState['task'] = fixTaskShape(JSON.parse(taskData));
+        yield put(syncTask(task));
       }
 
       yield put(syncDataCompletion({ error: undefined }));
@@ -171,15 +208,11 @@ function* syncDataSaga() {
   });
 }
 function* restoreSaga() {
-  yield takeLatest(restore.type, function* ({ payload }: ReturnType<typeof restore>) {
+  yield takeLatestSuspense(restore.type, function* ({ payload }: ReturnType<typeof restore>) {
     try {
       const favorites = ((state: RootState) => state.favorites)(yield select());
-      const data = JSON.parse(LZString.decompressFromBase64(payload) || 'null');
-
-      if (!matchRestoreShape(data)) {
-        throw new Error(ErrorMessage.WrongDataType);
-      }
-
+      const dict = ((state: RootState) => state.dict)(yield select());
+      const data = fixRestoreShape(JSON.parse(LZString.decompressFromBase64(payload) || 'null'));
       const newFavorites = data.favorites.filter(
         (hash) => favorites.findIndex((item) => item.mangaHash === hash) === -1
       );
@@ -187,10 +220,11 @@ function* restoreSaga() {
       yield put(toastMessage('正在进行数据恢复'));
       yield put(
         syncFavorites([
-          ...newFavorites.map((mangaHash) => ({ mangaHash, isTrend: false, inQueue: true })),
+          ...newFavorites.map((mangaHash) => ({ mangaHash, isTrend: false, enableBatch: true })),
           ...favorites,
         ])
       );
+      yield put(syncDict({ ...dict, lastWatch: { ...dict.lastWatch, ...data.lastWatch } }));
       yield put(batchUpdate(newFavorites));
       yield take(endBatchUpdate.type);
       yield put(restoreCompletion({ error: undefined }));
@@ -207,33 +241,43 @@ function* restoreSaga() {
   });
 }
 function* storageDataSaga() {
-  yield takeLatest(
+  yield takeLatestSuspense(
     [
+      clearCacheCompletion.type,
+      restoreCompletion.type,
       setMode.type,
+      setLight.type,
       setDirection.type,
       setSequence.type,
+      setAndroidDownloadPath.type,
       setSource.type,
+      setExtra.type,
       disablePlugin.type,
       viewChapter.type,
       viewPage.type,
       viewImage.type,
+      viewFavorites.type,
       addFavorites.type,
       removeFavorites.type,
-      pushQueque.type,
-      popQueue.type,
+      enabledBatch.type,
+      disabledBatch.type,
       loadSearchCompletion.type,
       loadDiscoveryCompletion.type,
       loadMangaCompletion.type,
       loadChapterCompletion.type,
+      pushTask.type,
+      removeTask.type,
+      finishTask.type,
     ],
     function* () {
-      yield delay(3000);
       const favorites = ((state: RootState) => state.favorites)(yield select());
       const dict = ((state: RootState) => state.dict)(yield select());
       const plugin = ((state: RootState) => state.plugin)(yield select());
       const setting = ((state: RootState) => state.setting)(yield select());
+      const task = ((state: RootState) => state.task)(yield select());
+      yield delay(3000);
 
-      const storeDict: RootState['dict'] = { manga: {}, chapter: dict.chapter };
+      const storeDict: RootState['dict'] = { ...dict, manga: {} };
       for (const hash in dict.manga) {
         if (favorites.findIndex((item) => item.mangaHash === hash) !== -1) {
           storeDict.manga[hash] = dict.manga[hash];
@@ -244,11 +288,12 @@ function* storageDataSaga() {
       yield call(AsyncStorage.setItem, storageKey.dict, JSON.stringify(storeDict));
       yield call(AsyncStorage.setItem, storageKey.plugin, JSON.stringify(plugin));
       yield call(AsyncStorage.setItem, storageKey.setting, JSON.stringify(setting));
+      yield call(AsyncStorage.setItem, storageKey.task, JSON.stringify(task));
     }
   );
 }
 function* clearCacheSaga() {
-  yield takeLatest([clearCache.type], function* () {
+  yield takeLatestSuspense(clearCache.type, function* () {
     yield call(AsyncStorage.clear);
     yield put(syncData());
     yield take(syncDataCompletion.type);
@@ -257,7 +302,7 @@ function* clearCacheSaga() {
 }
 
 function* loadLatestReleaseSaga() {
-  yield takeLatest([loadLatestRelease.type], function* () {
+  yield takeLatestSuspense(loadLatestRelease.type, function* () {
     const { error: fetchError, data } = yield call(fetchData, {
       url: 'https://api.github.com/repos/youniaogu/MangaReader/releases',
     });
@@ -268,8 +313,8 @@ function* loadLatestReleaseSaga() {
 }
 
 function* batchUpdateSaga() {
-  yield takeLeading(
-    [batchUpdate.type],
+  yield takeLeadingSuspense(
+    batchUpdate.type,
     function* ({ payload: defaultList }: ReturnType<typeof batchUpdate>) {
       const favorites = ((state: RootState) => state.favorites)(yield select());
       const fail = ((state: RootState) => state.batch.fail)(yield select());
@@ -277,12 +322,12 @@ function* batchUpdateSaga() {
         defaultList ||
         (fail.length > 0
           ? fail
-          : favorites.filter((item) => item.inQueue).map((item) => item.mangaHash));
+          : favorites.filter((item) => item.enableBatch).map((item) => item.mangaHash));
       const queue = [...batchList].map((hash) => ({ hash, retry: 0 }));
 
       const loadMangaEffect = function* ({ hash = '', retry = 0 }) {
         const [source] = splitHash(hash);
-        const id = nanoid();
+        const actionId = nanoid();
         const plugin = PluginMap.get(source);
         const dict = ((state: RootState) => state.dict)(yield select());
 
@@ -291,15 +336,13 @@ function* batchUpdateSaga() {
           outStack({ isSuccess: false, isTrend: false, hash, isRetry: false });
           return;
         }
-        yield put(loadManga({ mangaHash: hash, taskId: id }));
+        yield put(loadManga({ mangaHash: hash, actionId }));
 
         const {
           payload: { error: fetchError, data },
         }: ReturnType<typeof loadMangaCompletion> = yield take((takeAction: Action<string>) => {
-          const { type, payload } = takeAction as Action<string> & {
-            payload: ReturnType<typeof loadMangaCompletion>['payload'];
-          };
-          return type === loadMangaCompletion.type && payload.taskId === id;
+          const { type, payload } = takeAction as ReturnType<typeof loadMangaCompletion>;
+          return type === loadMangaCompletion.type && payload.actionId === actionId;
         });
 
         if (fetchError) {
@@ -311,7 +354,7 @@ function* batchUpdateSaga() {
           }
 
           yield put(outStack({ isSuccess: false, isTrend: false, hash, isRetry: retry <= 3 }));
-          yield delay(timeout || plugin.config.batchDelay);
+          yield delay(timeout || plugin.batchDelay);
         } else {
           const prev = dict.manga[hash]?.chapters;
           const curr = data?.chapters;
@@ -343,7 +386,7 @@ function* batchUpdateSaga() {
 }
 
 function* loadDiscoverySaga() {
-  yield takeLatest(
+  yield takeLatestSuspense(
     loadDiscovery.type,
     function* ({ payload: { source } }: ReturnType<typeof loadDiscovery>) {
       const plugin = PluginMap.get(source);
@@ -370,7 +413,7 @@ function* loadDiscoverySaga() {
         fetchData,
         plugin.prepareDiscoveryFetch(page, filterWithDefault)
       );
-      const { error: pluginError, discovery } = plugin.handleDiscovery(data);
+      const { error: pluginError, discovery } = trycatch(() => plugin.handleDiscovery(data));
 
       yield put(loadDiscoveryCompletion({ error: fetchError || pluginError, data: discovery }));
     }
@@ -378,7 +421,7 @@ function* loadDiscoverySaga() {
 }
 
 function* loadSearchSaga() {
-  yield takeLatest(
+  yield takeLatestSuspense(
     loadSearch.type,
     function* ({ payload: { keyword, source } }: ReturnType<typeof loadSearch>) {
       const plugin = PluginMap.get(source);
@@ -405,7 +448,7 @@ function* loadSearchSaga() {
         fetchData,
         plugin.prepareSearchFetch(keyword, page, filterWithDefault)
       );
-      const { error: pluginError, search } = plugin.handleSearch(data);
+      const { error: pluginError, search } = trycatch(() => plugin.handleSearch(data));
 
       yield put(loadSearchCompletion({ error: fetchError || pluginError, data: search }));
     }
@@ -413,23 +456,24 @@ function* loadSearchSaga() {
 }
 
 function* loadMangaSaga() {
-  yield takeEvery(
+  yield takeEverySuspense(
     loadManga.type,
-    function* ({ payload: { mangaHash, taskId } }: ReturnType<typeof loadManga>) {
+    function* ({ payload: { mangaHash, actionId } }: ReturnType<typeof loadManga>) {
       function* loadMangaEffect() {
-        yield put(loadMangaInfo({ mangaHash }));
+        yield put(loadMangaInfo({ mangaHash, actionId }));
         const {
           payload: { error: loadMangaInfoError, data: mangaInfo },
-        }: ReturnType<typeof loadMangaInfoCompletion> = yield take(loadMangaInfoCompletion.type);
+        }: ReturnType<typeof loadMangaInfoCompletion> = yield take((takeAction: Action<string>) => {
+          const { type, payload } = takeAction as ReturnType<typeof loadMangaInfoCompletion>;
+          return type === loadMangaInfoCompletion.type && payload.actionId === actionId;
+        });
 
         yield put(loadChapterList({ mangaHash, page: 1 }));
         const {
           payload: { error: loadChapterListError, data: chapterInfo },
         }: ReturnType<typeof loadChapterListCompletion> = yield take(
           (takeAction: Action<string>) => {
-            const { type, payload } = takeAction as Action<string> & {
-              payload: ReturnType<typeof loadChapterListCompletion>['payload'];
-            };
+            const { type, payload } = takeAction as ReturnType<typeof loadChapterListCompletion>;
             return (
               type === loadChapterListCompletion.type &&
               payload.data !== undefined &&
@@ -440,15 +484,17 @@ function* loadMangaSaga() {
         );
 
         if (loadMangaInfoError) {
-          yield put(loadMangaCompletion({ error: loadMangaInfoError, taskId }));
+          yield put(loadMangaCompletion({ error: loadMangaInfoError, actionId }));
           return;
         }
         if (loadChapterListError) {
-          yield put(loadMangaCompletion({ error: loadChapterListError, taskId }));
+          yield put(loadMangaCompletion({ error: loadChapterListError, actionId }));
           return;
         }
         if (!nonNullable(mangaInfo) || !nonNullable(chapterInfo)) {
-          yield put(loadMangaCompletion({ error: new Error(ErrorMessage.WrongDataType), taskId }));
+          yield put(
+            loadMangaCompletion({ error: new Error(ErrorMessage.WrongDataType), actionId })
+          );
           return;
         }
 
@@ -458,7 +504,7 @@ function* loadMangaSaga() {
               ...mangaInfo,
               chapters: (mangaInfo.chapters || []).concat(chapterInfo.list),
             },
-            taskId,
+            actionId,
           })
         );
       }
@@ -472,14 +518,16 @@ function* loadMangaSaga() {
 }
 
 function* loadMangaInfoSaga() {
-  yield takeEvery(
+  yield takeEverySuspense(
     loadMangaInfo.type,
-    function* ({ payload: { mangaHash } }: ReturnType<typeof loadMangaInfo>) {
+    function* ({ payload: { mangaHash, actionId } }: ReturnType<typeof loadMangaInfo>) {
       const [source, mangaId] = splitHash(mangaHash);
       const plugin = PluginMap.get(source);
 
       if (!plugin) {
-        yield put(loadMangaInfoCompletion({ error: new Error(ErrorMessage.PluginMissing) }));
+        yield put(
+          loadMangaInfoCompletion({ error: new Error(ErrorMessage.PluginMissing), actionId })
+        );
         return;
       }
 
@@ -487,15 +535,17 @@ function* loadMangaInfoSaga() {
         fetchData,
         plugin.prepareMangaInfoFetch(mangaId)
       );
-      const { error: pluginError, manga } = plugin.handleMangaInfo(data);
+      const { error: pluginError, manga } = trycatch(() => plugin.handleMangaInfo(data));
 
-      yield put(loadMangaInfoCompletion({ error: fetchError || pluginError, data: manga }));
+      yield put(
+        loadMangaInfoCompletion({ error: fetchError || pluginError, data: manga, actionId })
+      );
     }
   );
 }
 
 function* loadChapterListSaga() {
-  yield takeEvery(
+  yield takeEverySuspense(
     loadChapterList.type,
     function* ({ payload: { mangaHash, page } }: ReturnType<typeof loadChapterList>) {
       const [source, mangaId] = splitHash(mangaHash);
@@ -513,7 +563,11 @@ function* loadChapterListSaga() {
       }
 
       const { error: fetchError, data } = yield call(fetchData, body);
-      const { error: pluginError, chapterList = [], canLoadMore } = plugin.handleChapterList(data);
+      const {
+        error: pluginError,
+        chapterList = [],
+        canLoadMore,
+      } = trycatch(() => plugin.handleChapterList(data, mangaId));
 
       if (pluginError || fetchError) {
         yield put(
@@ -531,9 +585,7 @@ function* loadChapterListSaga() {
           payload: { error: loadMoreError, data: extraData },
         }: ReturnType<typeof loadChapterListCompletion> = yield take(
           (takeAction: Action<string>) => {
-            const { type, payload } = takeAction as Action<string> & {
-              payload: ReturnType<typeof loadChapterListCompletion>['payload'];
-            };
+            const { type, payload } = takeAction as ReturnType<typeof loadChapterListCompletion>;
             return (
               type === loadChapterListCompletion.type &&
               payload.data !== undefined &&
@@ -544,7 +596,7 @@ function* loadChapterListSaga() {
         );
 
         if (!loadMoreError && extraData) {
-          chapterList.unshift(...extraData.list);
+          chapterList.push(...extraData.list);
         }
       }
 
@@ -559,7 +611,7 @@ function* loadChapterListSaga() {
 }
 
 function* loadChapterSaga() {
-  yield takeEvery(
+  yield takeEverySuspense(
     loadChapter.type,
     function* ({ payload: { chapterHash } }: ReturnType<typeof loadChapter>) {
       const [source, mangaId, chapterId] = splitHash(chapterHash);
@@ -570,13 +622,46 @@ function* loadChapterSaga() {
         return;
       }
 
-      const { error: fetchError, data } = yield call(
-        fetchData,
-        plugin.prepareChapterFetch(mangaId, chapterId)
-      );
-      const { error: pluginError, chapter } = plugin.handleChapter(data, mangaId, chapterId);
+      let page = 1;
+      let error: Error | undefined;
+      let chapterList: Chapter | undefined;
+      while (true) {
+        const { error: fetchError, data } = yield call(
+          fetchData,
+          plugin.prepareChapterFetch(mangaId, chapterId, page)
+        );
+        const {
+          error: pluginError,
+          chapter,
+          canLoadMore,
+        } = trycatch(() => plugin.handleChapter(data, mangaId, chapterId, page));
 
-      yield put(loadChapterCompletion({ error: fetchError || pluginError, data: chapter }));
+        if (fetchError || pluginError) {
+          error = fetchError || pluginError;
+          break;
+        } else {
+          chapterList = {
+            ...chapterList,
+            ...chapter,
+            images: [...(chapterList?.images || []), ...chapter.images],
+          };
+        }
+        if (!canLoadMore) {
+          break;
+        }
+        page++;
+      }
+
+      if (error) {
+        yield put(loadChapterCompletion({ error }));
+        return;
+      }
+      if (!chapterList) {
+        yield put(loadChapterCompletion({ error: new Error(ErrorMessage.MissingChapterInfo) }));
+        return;
+      }
+
+      yield put(loadChapterCompletion({ error, data: chapterList }));
     }
   );
 }
@@ -592,8 +677,88 @@ function* hasAndroidPermission(permission: Permission) {
     PermissionsAndroid.request,
     permission
   );
-  console.log({ status, permission });
   return status === 'granted';
+}
+function* fileDownload({ source, headers }: { source: string; headers?: Record<string, string> }) {
+  yield call(CacheManager.prefetchBlob, source, { headers });
+}
+function* check(album?: string) {
+  if (Platform.OS === 'android') {
+    const writePermission = PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE;
+    const hasWritePermission: boolean = yield call(hasAndroidPermission, writePermission);
+    if (!hasWritePermission) {
+      throw new Error(ErrorMessage.WithoutPermission);
+    }
+
+    if (album) {
+      const androidDownloadPath = ((state: RootState) => state.setting.androidDownloadPath)(
+        yield select()
+      );
+      const isExisted: boolean = yield call(FileSystem.exists, `${androidDownloadPath}/${album}`);
+      if (!isExisted) {
+        yield call(FileSystem.mkdir, `${androidDownloadPath}/${album}`);
+      }
+    }
+  }
+}
+function* fileExport({
+  source,
+  album,
+  filename,
+}: {
+  source: string;
+  album: string;
+  filename?: string;
+}) {
+  const androidDownloadPath = ((state: RootState) => state.setting.androidDownloadPath)(
+    yield select()
+  );
+  const cacheEntry = CacheManager.get(source, undefined);
+  const path: string = yield call(cacheEntry.getPath.bind(cacheEntry));
+
+  if (Platform.OS === 'ios') {
+    yield call(CameraRoll.save, `file://${path}`, { album });
+  } else {
+    const [, name, suffix] = path.match(/.*\/(.*)\.(.*)$/) || [];
+    yield call(
+      FileSystem.cp,
+      `file://${path}`,
+      `${androidDownloadPath}/${album}/${filename || name}.${suffix}`
+    );
+  }
+}
+function* thread() {
+  while (true) {
+    const queue = ((state: RootState) =>
+      state.task.job.list.filter((item) => item.status === AsyncStatus.Default))(yield select());
+    const job = queue.shift();
+
+    if (!nonNullable(job)) {
+      yield delay(100);
+      yield put(finishJob());
+      break;
+    }
+
+    const { taskId, jobId, chapterHash, type, source, album, headers, index } = job;
+    yield put(startJob({ taskId, jobId }));
+    try {
+      const { timeout } = yield race({
+        download: call(fileDownload, { source, headers }),
+        timeout: delay(15000),
+      });
+      if (timeout) {
+        throw new Error(ErrorMessage.Timeout);
+      }
+
+      yield put(viewImage({ chapterHash, index, isVisited: false }));
+      if (type === TaskType.Export) {
+        yield call(fileExport, { source, album, filename: String(index) });
+      }
+      yield put(endJob({ taskId, jobId, status: AsyncStatus.Fulfilled }));
+    } catch (e) {
+      yield put(endJob({ taskId, jobId, status: AsyncStatus.Rejected }));
+    }
+  }
 }
 function* preloadChapter(chapterHash: string) {
   const prevDict = ((state: RootState) => state.dict.chapter)(yield select());
@@ -606,102 +771,130 @@ function* preloadChapter(chapterHash: string) {
   const currDict = ((state: RootState) => state.dict.chapter)(yield select());
   const currData = currDict[chapterHash];
 
-  if (!nonNullable(currData)) {
+  return currData;
+}
+function* pushChapterTask({
+  chapterHash,
+  taskType,
+  actionId,
+}: {
+  chapterHash: string;
+  taskType: TaskType;
+  actionId: string;
+}) {
+  const chapter: Chapter | undefined = yield call(preloadChapter, chapterHash);
+  if (!nonNullable(chapter)) {
+    yield put(pushTask({ error: new Error(ErrorMessage.PushTaskFail), actionId }));
     return;
   }
 
-  return currData;
+  const { title, headers, images } = chapter;
+  if (taskType === TaskType.Export) {
+    yield call(check, title);
+  }
+
+  yield put(
+    pushTask({
+      actionId,
+      data: {
+        taskId: nanoid(),
+        chapterHash,
+        title,
+        type: taskType,
+        status: AsyncStatus.Default,
+        headers,
+        queue: images.map((item, index) => ({ index, jobId: nanoid(), source: item.uri })),
+        pending: [],
+        success: [],
+        fail: [],
+      },
+    })
+  );
 }
-function* prehandleChapterSaga() {
-  yield takeEvery(
-    prehandleChapter.type,
+function* downloadAndExportChapterSaga() {
+  yield takeEverySuspense(
+    [downloadChapter.type, exportChapter.type],
     function* ({
-      payload: { mangaHash, chapterHash, save = false },
-    }: ReturnType<typeof prehandleChapter>) {
-      const chapter: Chapter | undefined = yield call(preloadChapter, chapterHash);
+      type,
+      payload: chapterHashList,
+    }: ReturnType<typeof downloadChapter | typeof exportChapter>) {
+      const { type: taskType, message } = {
+        [downloadChapter.type]: { type: TaskType.Download, message: '下载中...' },
+        [exportChapter.type]: { type: TaskType.Export, message: '导出中...' },
+      }[type];
+      yield put(toastMessage(message));
 
-      if (Platform.OS === 'android' && save) {
-        const readPermission =
-          Platform.Version >= 33
-            ? PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
-            : PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
-        const writePermission = PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE;
-        const hasReadPermission: boolean = yield call(hasAndroidPermission, readPermission);
-        const hasWritePermission: boolean = yield call(hasAndroidPermission, writePermission);
-        if (!hasReadPermission || !hasWritePermission) {
-          yield put(
-            prehandleChapterCompletion({ error: new Error(ErrorMessage.WithoutPermission) })
-          );
-          return;
-        }
-      }
-      if (!nonNullable(chapter)) {
-        yield put(prehandleChapterCompletion({ error: new Error(ErrorMessage.WrongDataType) }));
-        return;
-      }
-
-      const headers = chapter.headers;
-      const album = chapter.title;
-      const images = chapter.images.map((item) => item.uri);
-      const firstPrehandle = ((state: RootState) => state.setting.firstPrehandle)(yield select());
-
-      if (save && images.find((item) => item.includes('.webp'))) {
-        yield put(prehandleChapterCompletion({ error: new Error(ErrorMessage.IOSNotSupportWebp) }));
-        return;
-      }
-
-      yield put(
-        addPrehandleLog(
-          chapter.images.map((item, index) => ({
-            id: item.uri,
-            text: `${index + 1} - ${album}`,
-            status: AsyncStatus.Default,
-          }))
-        )
-      );
-      yield put(toastMessage(`【${album}】${save ? '下载' : '预加载'}中`));
-      if (firstPrehandle) {
-        yield put(setPrehandleLogStatus(true));
-      }
-
-      const len = images.length;
       while (true) {
-        const source = images.shift();
-        const index = len - images.length;
-
-        if (!nonNullable(source)) {
+        const actionId = nanoid();
+        const chapterHash = chapterHashList.pop();
+        if (!chapterHash) {
           break;
         }
 
-        yield put(
-          updatePrehandleLog({
-            id: source,
-            text: `${index} - ${album}`,
-            status: AsyncStatus.Pending,
-          })
-        );
-        yield call(CacheManager.prefetchBlob, source, { headers });
-        if (!save) {
-          const cacheEntry = CacheManager.get(source, undefined);
-          const path: string = yield call(cacheEntry.getPath.bind(cacheEntry));
-          yield call(CameraRoll.save, `file://${path}`, { album });
-        }
-        yield put(viewImage({ mangaHash, chapterHash, index, isPrefetch: true }));
-        yield put(
-          updatePrehandleLog({
-            id: source,
-            text: `${index} - ${album}`,
-            status: AsyncStatus.Fulfilled,
-          })
-        );
+        yield fork(pushChapterTask, { chapterHash, taskType, actionId });
+        yield take((takeAction: Action<string>) => {
+          const { type: takeActionType, payload } = takeAction as ReturnType<typeof pushTask>;
+          return takeActionType === pushTask.type && payload.actionId === actionId;
+        });
       }
-      yield put(toastMessage(`【${album}】${save ? '下载' : '预加载'}完成`));
     }
   );
 }
+function* saveImageSaga() {
+  yield takeEverySuspense(
+    saveImage.type,
+    function* ({ payload: { source, headers } }: ReturnType<typeof saveImage>) {
+      yield call(check);
+
+      let path: string;
+      if (/^data:image\/png;base64,.+/.test(source)) {
+        path = CacheManager.config.baseDir + nanoid() + '.png';
+        yield call(
+          FileSystem.writeFile,
+          path,
+          source.replace('data:image/png;base64,', ''),
+          'base64'
+        );
+      } else {
+        yield call(fileDownload, { source, headers });
+        const cacheEntry = CacheManager.get(source, undefined);
+        path = yield call(cacheEntry.getPath.bind(cacheEntry));
+      }
+
+      // https://storage-b.picacomic.com/static/36ec684d-82e8-4c0d-b164-745ce93070e6.png
+      // The operation couldn’t be completed. (PHPhotosErrorDomain error 3302.)
+      yield call(CameraRoll.save, `file://${path}`);
+      yield put(toastMessage('保存成功'));
+    }
+  );
+}
+function* taskManagerSaga() {
+  yield takeLeadingSuspense([restartTask.type, pushTask.type, retryTask.type], function* () {
+    while (true) {
+      const max = ((state: RootState) => state.task.job.max)(yield select());
+      const queue = ((state: RootState) =>
+        state.task.job.list.filter((item) => item.status === AsyncStatus.Default))(yield select());
+
+      if (queue.length <= 0) {
+        break;
+      }
+
+      for (let i = 0; i < max; i++) {
+        yield fork(thread);
+        if (i < max - 1) {
+          yield delay(0);
+        }
+      }
+      for (let i = 0; i < max; i++) {
+        yield take(finishJob.type);
+      }
+    }
+    yield put(finishTask());
+  });
+}
 
 function* catchErrorSaga() {
-  yield takeEvery('*', function* ({ type, payload }: PayloadAction<any>) {
+  yield takeEverySuspense('*', function* ({ type, payload }: PayloadAction<any>) {
     if (
       !haveError(payload) ||
       loadMangaInfoCompletion.type === type ||
@@ -713,18 +906,46 @@ function* catchErrorSaga() {
 
     const error = payload.error;
     if (error.message === 'Aborted') {
-      yield put(catchError(ErrorMessage.RequestTimeout));
+      yield put(toastMessage(ErrorMessage.RequestTimeout));
     } else {
-      yield put(catchError(error.message));
+      yield put(toastMessage(error.message));
     }
   });
 }
 
+function* takeEverySuspense(pattern: string | string[], worker: (...args: any[]) => any) {
+  yield takeEvery(pattern, tryCatchWorker(worker));
+}
+function* takeLatestSuspense(pattern: string | string[], worker: (...args: any[]) => any) {
+  yield takeLatest(pattern, tryCatchWorker(worker));
+}
+function* takeLeadingSuspense(pattern: string | string[], worker: (...args: any[]) => any) {
+  yield takeLeading(pattern, tryCatchWorker(worker));
+}
+function tryCatchWorker(fn: (...args: any[]) => any): (...args: any[]) => any {
+  // https://www.typescriptlang.org/docs/handbook/2/functions.html#declaring-this-in-a-function
+  return function* (this: any) {
+    try {
+      yield fn.apply(this, Array.from(arguments));
+    } catch (error) {
+      if (error instanceof Error) {
+        yield put(toastMessage(error.message));
+        return;
+      }
+      yield put(toastMessage(ErrorMessage.Unknown));
+    }
+  };
+}
+
 export default function* rootSaga() {
+  // all effect look like promise.all
+  // if fork effect throw any error, all effect with shut down
+  // so catch any error to keep saga running
   yield all([
     fork(initSaga),
 
     fork(launchSaga),
+    fork(pluginSyncDataSaga),
     fork(syncDataSaga),
     fork(restoreSaga),
     fork(storageDataSaga),
@@ -737,7 +958,9 @@ export default function* rootSaga() {
     fork(loadMangaInfoSaga),
     fork(loadChapterListSaga),
     fork(loadChapterSaga),
-    fork(prehandleChapterSaga),
+    fork(saveImageSaga),
+    fork(downloadAndExportChapterSaga),
+    fork(taskManagerSaga),
 
     fork(catchErrorSaga),
   ]);

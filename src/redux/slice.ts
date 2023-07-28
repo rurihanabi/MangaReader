@@ -1,6 +1,14 @@
-import { AsyncStatus, MangaStatus, ReaderMode, ReaderDirection, Sequence } from '~/utils';
+import {
+  AsyncStatus,
+  MangaStatus,
+  Sequence,
+  LayoutMode,
+  LightSwitch,
+  ReaderDirection,
+} from '~/utils';
 import { createSlice, combineReducers, PayloadAction } from '@reduxjs/toolkit';
 import { Plugin, defaultPlugin, defaultPluginList } from '~/plugins';
+import { Dirs } from 'react-native-file-access';
 
 export const initialState: RootState = {
   app: {
@@ -20,14 +28,16 @@ export const initialState: RootState = {
     publishTime: process.env.PUBLISH_TIME,
   },
   setting: {
-    mode: ReaderMode.Horizontal,
+    mode: LayoutMode.Horizontal,
+    light: LightSwitch.Off,
     direction: ReaderDirection.Right,
     sequence: Sequence.Desc,
-    firstPrehandle: true,
+    androidDownloadPath: Dirs.SDCardDir + '/DCIM',
   },
   plugin: {
     source: defaultPlugin,
     list: defaultPluginList,
+    extra: {},
   },
   batch: {
     loadStatus: AsyncStatus.Default,
@@ -54,26 +64,31 @@ export const initialState: RootState = {
   favorites: [],
   manga: {
     loadStatus: AsyncStatus.Default,
+    loadingMangaHash: '',
   },
   chapter: {
     loadStatus: AsyncStatus.Default,
+    loadingChapterHash: '',
     openDrawer: false,
     showDrawer: false,
-    prehandleLog: [],
   },
+  task: { list: [], job: { max: 5, list: [], thread: [] } },
   dict: {
     manga: {},
     chapter: {},
+    record: {},
+    lastWatch: {},
   },
 };
 const defaultIncreaseManga = {
   latest: '',
   updateTime: '',
+  bookCover: '',
+  infoCover: '',
   author: [],
   tag: [],
   status: MangaStatus.Unknown,
   chapters: [],
-  history: {},
 };
 
 const appSlice = createSlice({
@@ -91,10 +106,7 @@ const appSlice = createSlice({
       state.launchStatus = AsyncStatus.Fulfilled;
     },
     toastMessage(state, action: PayloadAction<string>) {
-      state.message.unshift(action.payload);
-    },
-    catchError(state, action: PayloadAction<string>) {
-      state.message.unshift(action.payload);
+      state.message.push(action.payload);
     },
     throwMessage(state) {
       state.message = [];
@@ -175,8 +187,11 @@ const settingSlice = createSlice({
   name: 'setting',
   initialState: initialState.setting,
   reducers: {
-    setMode(state, action: PayloadAction<ReaderMode>) {
+    setMode(state, action: PayloadAction<LayoutMode>) {
       state.mode = action.payload;
+    },
+    setLight(state, action: PayloadAction<LightSwitch>) {
+      state.light = action.payload;
     },
     setDirection(state, action: PayloadAction<ReaderDirection>) {
       state.direction = action.payload;
@@ -184,18 +199,17 @@ const settingSlice = createSlice({
     setSequence(state, action: PayloadAction<Sequence>) {
       state.sequence = action.payload;
     },
+    setAndroidDownloadPath(state, action: PayloadAction<string>) {
+      state.androidDownloadPath = action.payload;
+    },
     syncSetting(_state, action: PayloadAction<RootState['setting']>) {
       return action.payload;
     },
   },
   extraReducers: (builder) => {
-    builder
-      .addCase(datasyncAction.clearCache, () => {
-        return initialState.setting;
-      })
-      .addCase(chapterAction.addPrehandleLog, (state) => {
-        state.firstPrehandle = false;
-      });
+    builder.addCase(datasyncAction.clearCache, () => {
+      return initialState.setting;
+    });
   },
 });
 
@@ -205,6 +219,9 @@ const pluginSlice = createSlice({
   reducers: {
     setSource(state, action: PayloadAction<Plugin>) {
       state.source = action.payload;
+    },
+    setExtra(state, action: PayloadAction<{ source: Plugin; data: Record<string, any> }>) {
+      state.extra = { ...state.extra, ...action.payload.data };
     },
     disablePlugin(state, action: PayloadAction<Plugin>) {
       const index = state.list.findIndex((item) => item.value === action.payload);
@@ -352,29 +369,30 @@ const favoritesSlice = createSlice({
   name: 'favorites',
   initialState: initialState.favorites,
   reducers: {
-    addFavorites(state, action: PayloadAction<string>) {
-      state.unshift({ mangaHash: action.payload, isTrend: false, inQueue: true });
+    addFavorites(state, action: PayloadAction<{ mangaHash: string; enableBatch?: boolean }>) {
+      const { mangaHash, enableBatch = true } = action.payload;
+      state.unshift({ mangaHash, isTrend: false, enableBatch });
     },
     removeFavorites(state, action: PayloadAction<string>) {
       return state.filter((item) => item.mangaHash !== action.payload);
     },
-    pushQueque(state, action: PayloadAction<string>) {
+    enabledBatch(state, action: PayloadAction<string>) {
       return state.map((item) => {
         if (item.mangaHash === action.payload) {
           return {
             ...item,
-            inQueue: true,
+            enableBatch: true,
           };
         }
         return item;
       });
     },
-    popQueue(state, action: PayloadAction<string>) {
+    disabledBatch(state, action: PayloadAction<string>) {
       return state.map((item) => {
         if (item.mangaHash === action.payload) {
           return {
             ...item,
-            inQueue: false,
+            enableBatch: false,
           };
         }
         return item;
@@ -415,19 +433,21 @@ const mangaSlice = createSlice({
   name: 'manga',
   initialState: initialState.manga,
   reducers: {
-    loadManga(state, _action: PayloadAction<{ mangaHash: string; taskId?: string }>) {
+    loadManga(state, action: PayloadAction<{ mangaHash: string; actionId?: string }>) {
       state.loadStatus = AsyncStatus.Pending;
+      state.loadingMangaHash = action.payload.mangaHash;
     },
     loadMangaCompletion(state, action: FetchResponseAction<IncreaseManga>) {
       const { error } = action.payload;
+
+      state.loadingMangaHash = '';
       if (error) {
         state.loadStatus = AsyncStatus.Rejected;
         return;
       }
-
       state.loadStatus = AsyncStatus.Fulfilled;
     },
-    loadMangaInfo(_state, _action: PayloadAction<{ mangaHash: string }>) {},
+    loadMangaInfo(_state, _action: PayloadAction<{ mangaHash: string; actionId?: string }>) {},
     loadMangaInfoCompletion(_state, _action: FetchResponseAction<IncreaseManga>) {},
     loadChapterList(_state, _action: PayloadAction<{ mangaHash: string; page: number }>) {},
     loadChapterListCompletion(
@@ -441,51 +461,165 @@ const chapterSlice = createSlice({
   name: 'chapter',
   initialState: initialState.chapter,
   reducers: {
-    loadChapter(state, _action: PayloadAction<{ chapterHash: string }>) {
+    loadChapter(state, action: PayloadAction<{ chapterHash: string }>) {
       state.loadStatus = AsyncStatus.Pending;
+      state.loadingChapterHash = action.payload.chapterHash;
     },
     loadChapterCompletion(state, action: FetchResponseAction<Chapter>) {
       const { error } = action.payload;
+      state.loadingChapterHash = '';
       if (error) {
         state.loadStatus = AsyncStatus.Rejected;
         return;
       }
-
       state.loadStatus = AsyncStatus.Fulfilled;
     },
-    prehandleChapter(
+
+    downloadChapter: (_state, _action: PayloadAction<string[]>) => {},
+    exportChapter: (_state, _action: PayloadAction<string[]>) => {},
+    saveImage: (
       _state,
-      _action: PayloadAction<{ mangaHash: string; chapterHash: string; save?: boolean }>
-    ) {},
-    prehandleChapterCompletion(_state, _action: FetchResponseAction) {},
+      _action: PayloadAction<{ source: string; headers?: Record<string, string> }>
+    ) => {},
+
     setPrehandleLogStatus(state, action: PayloadAction<boolean>) {
       state.openDrawer = action.payload && state.showDrawer;
     },
     setPrehandleLogVisible(state, action: PayloadAction<boolean>) {
       state.showDrawer = action.payload;
     },
-    addPrehandleLog(
-      state,
-      action: PayloadAction<{ id: string; text: string; status: AsyncStatus }[]>
-    ) {
-      state.prehandleLog = action.payload.concat(state.prehandleLog);
-    },
-    updatePrehandleLog(
-      state,
-      action: PayloadAction<{ id: string; text: string; status: AsyncStatus }>
-    ) {
-      state.prehandleLog = state.prehandleLog
-        .map((item) => {
-          if (item.id !== action.payload.id) {
-            return item;
-          }
+  },
+});
 
-          return {
-            ...item,
-            ...action.payload,
-          };
-        })
-        .filter((item) => item.status !== AsyncStatus.Fulfilled);
+const missionSlice = createSlice({
+  name: 'task',
+  initialState: initialState.task,
+  reducers: {
+    restartTask(state) {
+      state.list = state.list.map((item) => ({
+        ...item,
+        status:
+          item.success.length >= item.queue.length ? AsyncStatus.Fulfilled : AsyncStatus.Default,
+        pending: [],
+        fail: [],
+      }));
+      state.job.thread = [];
+      state.job.list = state.list
+        .map((task) =>
+          task.queue
+            .filter((item) => !task.success.includes(item.jobId))
+            .map((item) => ({
+              taskId: task.taskId,
+              jobId: item.jobId,
+              chapterHash: task.chapterHash,
+              type: task.type,
+              status: AsyncStatus.Default,
+              source: item.source,
+              album: task.title,
+              index: item.index,
+              headers: task.headers,
+            }))
+        )
+        .flat();
+    },
+    pushTask(state, action: FetchResponseAction<Task>) {
+      const { error, data: task } = action.payload;
+      if (error) {
+        return;
+      }
+
+      state.list.push(task);
+      state.job.list.push(
+        ...task.queue.map((item) => ({
+          taskId: task.taskId,
+          jobId: item.jobId,
+          chapterHash: task.chapterHash,
+          type: task.type,
+          status: AsyncStatus.Default,
+          source: item.source,
+          album: task.title,
+          index: item.index,
+          headers: task.headers,
+        }))
+      );
+    },
+    retryTask(state, action: PayloadAction<string[]>) {
+      action.payload.forEach((taskId) => {
+        const task = state.list.find((item) => item.taskId === taskId);
+        if (task && task.fail.length > 0) {
+          state.job.list = state.job.list.filter((item) => item.taskId !== taskId);
+          state.job.thread = state.job.thread.filter((item) => item.taskId !== taskId);
+          state.job.list.push(
+            ...task.queue
+              .filter((item) => task.fail.includes(item.jobId))
+              .map((item) => ({
+                taskId: task.taskId,
+                jobId: item.jobId,
+                chapterHash: task.chapterHash,
+                type: task.type,
+                status: AsyncStatus.Default,
+                source: item.source,
+                album: task.title,
+                index: item.index,
+                headers: task.headers,
+              }))
+          );
+          task.fail = [];
+          task.status = AsyncStatus.Default;
+        }
+      });
+    },
+    removeTask(state, action: PayloadAction<string>) {
+      state.list = state.list.filter((item) => item.taskId !== action.payload);
+      state.job.list = state.job.list.filter((item) => item.taskId !== action.payload);
+      state.job.thread = state.job.thread.filter((item) => item.taskId !== action.payload);
+    },
+    finishTask() {},
+    startJob(state, action: PayloadAction<{ taskId: string; jobId: string }>) {
+      const { taskId, jobId } = action.payload;
+      const task = state.list.find((item) => item.taskId === taskId);
+      const job = state.job.list.find((item) => item.taskId === taskId && item.jobId === jobId);
+
+      if (task && job) {
+        task.pending.push(jobId);
+        task.status = AsyncStatus.Pending;
+        job.status = AsyncStatus.Pending;
+        state.job.thread.push({ taskId, jobId });
+      }
+    },
+    endJob(state, action: PayloadAction<{ taskId: string; jobId: string; status: AsyncStatus }>) {
+      const { taskId, jobId, status } = action.payload;
+      const task = state.list.find((item) => item.taskId === taskId);
+
+      if (task) {
+        task.pending = task.pending.filter((item) => item === jobId);
+        state.job.thread = state.job.thread.filter(
+          (item) => item.taskId !== taskId || item.jobId !== jobId
+        );
+        state.job.list = state.job.list.filter(
+          (item) => item.taskId !== taskId || item.jobId !== jobId
+        );
+        if (status === AsyncStatus.Fulfilled) {
+          task.success.push(jobId);
+        }
+        if (status === AsyncStatus.Rejected) {
+          task.fail.push(jobId);
+        }
+        if (task.success.length + task.fail.length >= task.queue.length) {
+          if (task.fail.length <= 0) {
+            task.status = AsyncStatus.Fulfilled;
+            state.list = state.list.filter((item) => item.taskId !== taskId);
+          } else {
+            task.status = AsyncStatus.Rejected;
+          }
+        } else {
+          task.status = AsyncStatus.Pending;
+        }
+      }
+    },
+    finishJob() {},
+    syncTask(_state, action: PayloadAction<RootState['task']>) {
+      return action.payload;
     },
   },
 });
@@ -497,38 +631,34 @@ const dictSlice = createSlice({
     syncDict(_state, action: PayloadAction<RootState['dict']>) {
       return action.payload;
     },
-    viewChapter(state, action: PayloadAction<{ mangaHash: string; chapterHash: string }>) {
-      const { mangaHash, chapterHash } = action.payload;
-      const manga = state.manga[mangaHash];
-
-      if (manga) {
-        manga.lastWatchChapter = chapterHash;
+    viewChapter(
+      state,
+      action: PayloadAction<{ mangaHash: string; chapterHash: string; chapterTitle: string }>
+    ) {
+      const { mangaHash, chapterHash, chapterTitle } = action.payload;
+      if (!state.lastWatch[mangaHash]) {
+        state.lastWatch[mangaHash] = {};
       }
+      state.lastWatch[mangaHash].chapter = chapterHash;
+      state.lastWatch[mangaHash].title = chapterTitle;
     },
     viewPage(state, action: PayloadAction<{ mangaHash: string; page: number }>) {
       const { mangaHash, page } = action.payload;
-      const manga = state.manga[mangaHash];
-
-      if (manga) {
-        manga.lastWatchPage = page;
+      if (!state.lastWatch[mangaHash]) {
+        state.lastWatch[mangaHash] = {};
       }
+      state.lastWatch[mangaHash].page = page;
     },
     viewImage(
       state,
-      action: PayloadAction<{
-        mangaHash: string;
-        chapterHash: string;
-        index: number;
-        isPrefetch?: boolean;
-      }>
+      action: PayloadAction<{ chapterHash: string; index: number; isVisited?: boolean }>
     ) {
-      const { mangaHash, chapterHash, index, isPrefetch = false } = action.payload;
-      const manga = state.manga[mangaHash];
+      const { chapterHash, index, isVisited = true } = action.payload;
       const chapter = state.chapter[chapterHash];
 
-      if (manga && chapter) {
-        if (!manga.history[chapterHash]) {
-          manga.history[chapterHash] = {
+      if (chapter) {
+        if (!state.record[chapterHash]) {
+          state.record[chapterHash] = {
             total: 0,
             progress: 0,
             imagesLoaded: [],
@@ -536,19 +666,17 @@ const dictSlice = createSlice({
           };
         }
 
-        const imagesLoaded = Array.from(
-          new Set([...manga.history[chapterHash].imagesLoaded, index])
-        );
+        const prev = state.record[chapterHash];
+        const imagesLoaded = Array.from(new Set([...prev.imagesLoaded, index]));
 
-        manga.history[chapterHash] = {
-          ...manga.history[chapterHash],
+        state.record[chapterHash] = {
           total: chapter.images.length,
           progress: Math.max(
-            manga.history[chapterHash].progress,
+            prev.progress,
             Math.floor((imagesLoaded.length * 100) / chapter.images.length)
           ),
           imagesLoaded,
-          isVisited: !isPrefetch ? true : manga.history[chapterHash].isVisited,
+          isVisited: isVisited ? true : prev.isVisited,
         };
       }
     },
@@ -620,6 +748,7 @@ const discoveryAction = discoverySlice.actions;
 const favoritesAction = favoritesSlice.actions;
 const mangaAction = mangaSlice.actions;
 const chapterAction = chapterSlice.actions;
+const missionAction = missionSlice.actions;
 const dictAction = dictSlice.actions;
 
 const appReducer = appSlice.reducer;
@@ -633,6 +762,7 @@ const discoveryReducer = discoverySlice.reducer;
 const favoritesReducer = favoritesSlice.reducer;
 const mangaReducer = mangaSlice.reducer;
 const chapterReducer = chapterSlice.reducer;
+const missionReducer = missionSlice.reducer;
 const dictReducer = dictSlice.reducer;
 
 export const action = {
@@ -647,6 +777,7 @@ export const action = {
   ...favoritesAction,
   ...mangaAction,
   ...chapterAction,
+  ...missionAction,
   ...dictAction,
 };
 export const reducer = combineReducers<RootState>({
@@ -661,5 +792,6 @@ export const reducer = combineReducers<RootState>({
   favorites: favoritesReducer,
   manga: mangaReducer,
   chapter: chapterReducer,
+  task: missionReducer,
   dict: dictReducer,
 });

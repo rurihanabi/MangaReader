@@ -1,5 +1,4 @@
 import { FetchData } from '~/utils';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface InitialData {
   id: Plugin;
@@ -10,18 +9,15 @@ interface InitialData {
   href: string;
   userAgent?: string;
   defaultHeaders?: Record<string, string>;
-  config: PartialOption<PluginConfig, 'batchDelay'>;
   option?: {
     discovery: PartialOption<FilterItem, 'defaultValue'>[];
     search: PartialOption<FilterItem, 'defaultValue'>[];
   };
   disabled?: boolean;
+  batchDelay?: number;
+  injectedJavaScript?: string;
 }
 
-interface PluginConfig {
-  origin: OptionItem;
-  batchDelay: number;
-}
 interface FilterItem {
   name: string;
   defaultValue: string;
@@ -38,6 +34,7 @@ export enum Plugin {
   MHM = 'MHM',
   KL = 'KL',
   NH = 'NH',
+  PICA = 'PICA',
 }
 
 export enum Options {
@@ -77,7 +74,7 @@ abstract class Base {
   readonly description: string;
   readonly href: string;
   readonly userAgent?: string;
-  readonly defaultHeaders?: Record<string, string>;
+  readonly defaultHeaders: Record<string, string>;
 
   /**
    * @description filter in Discovery and Search page
@@ -92,11 +89,16 @@ abstract class Base {
    */
   readonly disabled: boolean;
   /**
-   * @description config with sync by AsyncStorage
-   * @type {PluginConfig}
+   * @type {number}
    * @memberof Base
    */
-  config: PluginConfig;
+  batchDelay: number;
+  /**
+   * @description run js in webview
+   * @type {string}
+   * @memberof Base
+   */
+  injectedJavaScript?: string;
 
   /**
    * @description Creates an instance of Base.
@@ -111,11 +113,12 @@ abstract class Base {
       description = name,
       href,
       userAgent,
-      defaultHeaders,
+      defaultHeaders = {},
       score,
-      config,
       option = { discovery: [], search: [] },
       disabled = false,
+      batchDelay = 3000,
+      injectedJavaScript,
     } = init;
     this.id = id;
     this.name = name;
@@ -125,7 +128,6 @@ abstract class Base {
     this.userAgent = userAgent;
     this.defaultHeaders = defaultHeaders;
     this.score = score;
-    this.config = { ...config, batchDelay: config.batchDelay || 3000 };
     this.option = {
       discovery: option.discovery.map((item) => ({
         ...item,
@@ -137,7 +139,8 @@ abstract class Base {
       })),
     };
     this.disabled = disabled;
-    this.sync();
+    this.batchDelay = batchDelay;
+    this.injectedJavaScript = injectedJavaScript;
   }
 
   /**
@@ -170,18 +173,6 @@ abstract class Base {
   }
 
   /**
-   * @description sync config from AsyncStorage
-   * @memberof Base
-   */
-  public sync() {
-    AsyncStorage.getItem(this.id).then((value) => {
-      if (value) {
-        this.config = JSON.parse(value);
-      }
-    });
-  }
-
-  /**
    * @description verify hash belong to the plugin
    * @public
    * @param {string} hash
@@ -193,14 +184,7 @@ abstract class Base {
     return plugin === this.id;
   }
 
-  /**
-   * @description plugin is ready for use
-   * @return {*}  {Promise<boolean>}
-   * @memberof Base
-   */
-  public ready(): boolean {
-    return this.config === undefined;
-  }
+  public syncExtraData(_data: Record<string, any>) {}
 
   /**
    * @description accept page param, return body for discovery fetch
@@ -254,7 +238,7 @@ abstract class Base {
    * @return {*}  {FetchData}
    * @memberof Base
    */
-  abstract prepareChapterFetch(mangaId: string, chapterId: string): FetchData;
+  abstract prepareChapterFetch(mangaId: string, chapterId: string, page: number): FetchData;
 
   /**
    * @description crawl data from website or interface
@@ -298,7 +282,8 @@ abstract class Base {
    * @memberof Base
    */
   abstract handleChapterList(
-    response: any
+    response: any,
+    mangaId: string
   ):
     | { error: Error; chapterList?: undefined; canLoadMore?: boolean }
     | { error?: undefined; chapterList: Manga['chapters']; canLoadMore: boolean };
@@ -313,8 +298,11 @@ abstract class Base {
   abstract handleChapter(
     response: any,
     mangaId: string,
-    chapterId: string
-  ): { error: Error; chapter?: undefined } | { error?: undefined; chapter: Chapter };
+    chapterId: string,
+    page: number
+  ):
+    | { error: Error; chapter?: undefined; canLoadMore?: boolean }
+    | { error?: undefined; chapter: Chapter; canLoadMore: boolean };
 }
 
 export default Base;
