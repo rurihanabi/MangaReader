@@ -7,44 +7,85 @@ import React, {
   forwardRef,
   ForwardRefRenderFunction,
 } from 'react';
-import { FlashList, ListRenderItemInfo } from '@shopify/flash-list';
-import { useWindowDimensions } from 'react-native';
+import {
+  getDefaultFillMedianHeight,
+  LayoutMode,
+  PositionX,
+  ScrambleType,
+  MultipleSeat,
+  SafeArea,
+  Orientation,
+} from '~/utils';
+import { FlashList, ListRenderItemInfo, ViewToken } from '@shopify/flash-list';
+import { NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
+import { useDebouncedSafeAreaFrame } from '~/hooks';
 import { useFocusEffect } from '@react-navigation/native';
-import { PositionX } from '~/utils';
-import { Box } from 'native-base';
+import { Box, Flex } from 'native-base';
+import Controller, { LongPressController } from '~/components/Controller';
 import ComicImage, { ImageState } from '~/components/ComicImage';
-import Controller from '~/components/Controller';
+import Cache from '~/utils/cache';
 
 export interface ReaderProps {
   initPage?: number;
   inverted?: boolean;
-  horizontal?: boolean;
+  seat?: MultipleSeat;
+  layoutMode?: LayoutMode;
   data?: {
     uri: string;
+    scrambleType?: ScrambleType;
     needUnscramble?: boolean | undefined;
-    chapterHash: string;
+    pre: number;
     current: number;
+    chapterHash: string;
   }[];
   headers?: Chapter['headers'];
   onTap?: (position: PositionX) => void;
-  onLongPress?: (position: PositionX, ref?: ImageState[]) => void;
+  onLongPress?: (position: PositionX, source?: string) => void;
   onImageLoad?: (uri: string, hash: string, index: number) => void;
   onPageChange?: (page: number) => void;
   onLoadMore?: () => void;
+  onZoomStart?: (scale: number) => void;
+  onZoomEnd?: (scale: number) => void;
+  onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  onScrollBeginDrag?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  onScrollEndDrag?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  cache: Cache;
 }
 
 export interface ReaderRef {
   scrollToIndex: (index: number, animated?: boolean) => void;
   scrollToOffset: (offset: number, animated?: boolean) => void;
   clearStateRef: () => void;
-  getSource: (index: number, isHorizontal?: boolean) => string;
 }
+
+const useTakeTwo = (data: Required<ReaderProps>['data'], size = 2, seat: MultipleSeat) => {
+  return useMemo(() => {
+    const list: Required<ReaderProps>['data']['0'][][] = [];
+
+    for (let i = 0; i < data.length; ) {
+      const batch = data.slice(i, i + size).reduce<typeof data>((dict, item) => {
+        if (dict.length <= 0) {
+          dict.push(item);
+        } else if (dict[0].chapterHash === item.chapterHash) {
+          dict.push(item);
+        }
+        return dict;
+      }, []);
+
+      list.push(seat === MultipleSeat.AToB ? batch : batch.reverse());
+      i += batch.length;
+    }
+
+    return list;
+  }, [data, size, seat]);
+};
 
 const Reader: ForwardRefRenderFunction<ReaderRef, ReaderProps> = (
   {
-    initPage = 1,
+    initPage = 0,
     inverted = false,
-    horizontal = false,
+    seat = MultipleSeat.AToB,
+    layoutMode = LayoutMode.Horizontal,
     data = [],
     headers = {},
     onTap,
@@ -52,31 +93,44 @@ const Reader: ForwardRefRenderFunction<ReaderRef, ReaderProps> = (
     onImageLoad,
     onPageChange,
     onLoadMore,
+    onZoomStart,
+    onZoomEnd,
+    onScroll,
+    onScrollBeginDrag,
+    onScrollEndDrag,
+    cache,
   },
   ref
 ) => {
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const flashListRef = useRef<FlashList<(typeof data)[0]>>(null);
-  const horizontalStateRef = useRef<ImageState[]>([]);
-  const verticalStateRef = useRef<ImageState[]>([]);
+  const { width: windowWidth, height: windowHeight, orientation } = useDebouncedSafeAreaFrame();
+  const multipleData = useTakeTwo(data, 2, seat);
+  const flashListRef = useRef<FlashList<any>>(null);
+  const horizontalStateRef = useRef<(ImageState | null)[]>([]);
+  const verticalStateRef = useRef<(ImageState | null)[]>([]);
+  const multipleStateRef = useRef<Record<string, ImageState | null>[]>([]);
 
-  const onTapRef = useRef(onTap);
-  const onLongPressRef = useRef(onLongPress);
+  const portraitHeight = (Math.max(windowWidth, windowHeight) * 3) / 5;
+  const landscapeHeight = (Math.min(windowWidth, windowHeight) * 3) / 5;
+  const defaultPortraitHeightRef = useRef(portraitHeight);
+  const defaultLandscapeHeightRef = useRef(landscapeHeight);
+
   const onPageChangeRef = useRef(onPageChange);
-  onTapRef.current = onTap;
-  onLongPressRef.current = onLongPress;
   onPageChangeRef.current = onPageChange;
 
-  const initialScrollIndex = useMemo(
-    () => Math.max(Math.min(initPage - 1, data.length - 1), 0),
-    [initPage, data.length]
-  );
+  const initialScrollIndex = useMemo(() => {
+    if (layoutMode !== LayoutMode.Multiple) {
+      return Math.max(Math.min(initPage, data.length - 1), 0);
+    } else {
+      return Math.max(Math.min(Math.ceil((initPage + 1) / 2) - 1, multipleData.length - 1), 0);
+    }
+  }, [initPage, data.length, multipleData, layoutMode]);
 
   useFocusEffect(
     useCallback(() => {
       return () => {
         horizontalStateRef.current = [];
         verticalStateRef.current = [];
+        multipleStateRef.current = [];
       };
     }, [])
   );
@@ -91,9 +145,7 @@ const Reader: ForwardRefRenderFunction<ReaderRef, ReaderProps> = (
     clearStateRef: () => {
       horizontalStateRef.current = [];
       verticalStateRef.current = [];
-    },
-    getSource: (index: number, isHorizontal = false) => {
-      return (isHorizontal ? horizontalStateRef : verticalStateRef).current[index].dataUrl;
+      multipleStateRef.current = [];
     },
   }));
 
@@ -102,41 +154,51 @@ const Reader: ForwardRefRenderFunction<ReaderRef, ReaderProps> = (
   const HandleViewableItemsChanged = ({
     viewableItems,
   }: {
-    viewableItems: {
-      item: any;
-      key: string;
-      index: number | null;
-      isViewable: boolean;
-      timestamp: number;
-    }[];
+    viewableItems: ViewToken[];
+    changed: ViewToken[];
   }) => {
     if (!viewableItems || viewableItems.length <= 0) {
       return;
     }
 
-    onPageChangeRef.current &&
-      onPageChangeRef.current(viewableItems[viewableItems.length - 1].index || 0);
+    const last = viewableItems[viewableItems.length - 1];
+    onPageChangeRef.current && onPageChangeRef.current(last.index || 0);
+  };
+  const HandleMultipleViewableItemsChanged = ({
+    viewableItems,
+  }: {
+    viewableItems: ViewToken[];
+    changed: ViewToken[];
+  }) => {
+    if (!viewableItems || viewableItems.length <= 0) {
+      return;
+    }
+
+    const last = viewableItems[viewableItems.length - 1];
+    onPageChangeRef.current && onPageChangeRef.current(last.item[0].pre + last.item[0].current - 1);
   };
   const renderHorizontalItem = ({ item, index }: ListRenderItemInfo<(typeof data)[0]>) => {
-    const { uri, needUnscramble } = item;
-    const horizontalState = horizontalStateRef.current[index];
+    const { uri, scrambleType, needUnscramble } = item;
+    const horizontalState = horizontalStateRef.current[index] || undefined;
     return (
       <Controller
         horizontal
-        onTap={(position) => {
-          onTapRef.current && onTapRef.current(position);
-        }}
-        onLongPress={(position) => {
-          onLongPressRef.current && onLongPressRef.current(position);
-        }}
+        onTap={onTap}
+        onLongPress={(position) => onLongPress && onLongPress(position, horizontalState?.dataUrl)}
+        onZoomStart={onZoomStart}
+        onZoomEnd={onZoomEnd}
+        safeAreaType={SafeArea.All}
       >
         <ComicImage
-          horizontal
           uri={uri}
           index={index}
-          useJMC={needUnscramble}
+          scrambleType={scrambleType}
+          needUnscramble={needUnscramble}
           headers={headers}
           prevState={horizontalState}
+          defaultPortraitHeight={defaultPortraitHeightRef.current}
+          defaultLandscapeHeight={defaultLandscapeHeightRef.current}
+          layoutMode={LayoutMode.Horizontal}
           onChange={(state, idx = index) => {
             horizontalStateRef.current[idx] = state;
             onImageLoad && onImageLoad(uri, item.chapterHash, item.current);
@@ -146,35 +208,148 @@ const Reader: ForwardRefRenderFunction<ReaderRef, ReaderProps> = (
     );
   };
   const renderVerticalItem = ({ item, index }: ListRenderItemInfo<(typeof data)[0]>) => {
-    const { uri, needUnscramble } = item;
-    const verticalState = verticalStateRef.current[index];
+    const { uri, scrambleType, needUnscramble } = item;
+    const verticalState = verticalStateRef.current[index] || undefined;
+    const cacheState = cache.getImageState(uri);
     return (
-      <ComicImage
-        uri={uri}
-        index={index}
-        useJMC={needUnscramble}
-        headers={headers}
-        prevState={verticalState}
-        onChange={(state, idx = index) => {
-          verticalStateRef.current[idx] = state;
-          onImageLoad && onImageLoad(uri, item.chapterHash, item.current);
+      <Box
+        overflow="hidden"
+        style={{
+          height:
+            orientation === Orientation.Portrait
+              ? verticalState?.portraitHeight ||
+                cacheState?.portraitHeight ||
+                defaultPortraitHeightRef.current
+              : verticalState?.landscapeHeight ||
+                cacheState?.landscapeHeight ||
+                defaultLandscapeHeightRef.current,
         }}
-      />
+      >
+        <Controller
+          onTap={onTap}
+          onLongPress={(position) => onLongPress && onLongPress(position, verticalState?.dataUrl)}
+          onZoomStart={onZoomStart}
+          onZoomEnd={onZoomEnd}
+          safeAreaType={SafeArea.X}
+        >
+          <ComicImage
+            uri={uri}
+            index={index}
+            scrambleType={scrambleType}
+            needUnscramble={needUnscramble}
+            headers={headers}
+            prevState={verticalState}
+            defaultPortraitHeight={defaultPortraitHeightRef.current}
+            defaultLandscapeHeight={defaultLandscapeHeightRef.current}
+            layoutMode={LayoutMode.Vertical}
+            onChange={(state, idx = index) => {
+              cache.setImageState(uri, state);
+              verticalStateRef.current[idx] = state;
+              onImageLoad && onImageLoad(uri, item.chapterHash, item.current);
+
+              const defaultHeight = getDefaultFillMedianHeight(
+                verticalStateRef.current.filter(
+                  (imageState): imageState is ImageState => imageState !== null
+                ),
+                { portrait: portraitHeight, landscape: landscapeHeight }
+              );
+              defaultPortraitHeightRef.current = defaultHeight.portrait;
+              defaultLandscapeHeightRef.current = defaultHeight.landscape;
+            }}
+          />
+        </Controller>
+      </Box>
+    );
+  };
+  const renderMultipleItem = ({ item, index }: ListRenderItemInfo<(typeof multipleData)[0]>) => {
+    return (
+      <Controller
+        horizontal
+        safeAreaType={SafeArea.All}
+        onTap={onTap}
+        onZoomStart={onZoomStart}
+        onZoomEnd={onZoomEnd}
+      >
+        <Flex w="full" h="full" flexDirection="row" alignItems="center" justifyContent="center">
+          {item.map(({ uri, scrambleType, needUnscramble, chapterHash, current }) => {
+            const multipleState = (multipleStateRef.current[index] || [])[uri] || undefined;
+            return (
+              <Box key={uri}>
+                <LongPressController
+                  onLongPress={() =>
+                    onLongPress && onLongPress(PositionX.Mid, multipleState?.dataUrl)
+                  }
+                >
+                  <ComicImage
+                    uri={uri}
+                    index={index}
+                    scrambleType={scrambleType}
+                    needUnscramble={needUnscramble}
+                    headers={headers}
+                    prevState={multipleState}
+                    defaultPortraitHeight={defaultPortraitHeightRef.current}
+                    defaultLandscapeHeight={defaultLandscapeHeightRef.current}
+                    layoutMode={LayoutMode.Multiple}
+                    onChange={(state, idx = index) => {
+                      if (typeof multipleStateRef.current[idx] !== 'object') {
+                        multipleStateRef.current[idx] = {};
+                      }
+                      multipleStateRef.current[idx][uri] = state;
+                      onImageLoad && onImageLoad(uri, chapterHash, current);
+                    }}
+                  />
+                </LongPressController>
+              </Box>
+            );
+          })}
+        </Flex>
+      </Controller>
     );
   };
 
-  if (horizontal) {
+  if (layoutMode === LayoutMode.Multiple) {
     return (
       <FlashList
+        key="multiple"
+        ref={flashListRef}
+        data={multipleData}
+        inverted={inverted}
+        horizontal
+        pagingEnabled
+        extraData={{ inverted, onTap, onLongPress, onImageLoad }}
+        viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
+        initialScrollIndex={initialScrollIndex}
+        estimatedItemSize={windowWidth}
+        estimatedListSize={{ width: windowWidth, height: windowHeight }}
+        onScroll={onScroll}
+        onScrollBeginDrag={onScrollBeginDrag}
+        onScrollEndDrag={onScrollEndDrag}
+        onEndReached={onLoadMore}
+        onEndReachedThreshold={3}
+        onViewableItemsChanged={HandleMultipleViewableItemsChanged}
+        renderItem={renderMultipleItem}
+        keyExtractor={(item) => item.map((i) => i.uri).join('#')}
+      />
+    );
+  }
+
+  if (layoutMode === LayoutMode.Horizontal) {
+    return (
+      <FlashList
+        key="horizontal"
         ref={flashListRef}
         data={data}
         inverted={inverted}
         horizontal
         pagingEnabled
+        extraData={{ inverted, onTap, onLongPress, onImageLoad }}
         viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
         initialScrollIndex={initialScrollIndex}
         estimatedItemSize={windowWidth}
         estimatedListSize={{ width: windowWidth, height: windowHeight }}
+        onScroll={onScroll}
+        onScrollBeginDrag={onScrollBeginDrag}
+        onScrollEndDrag={onScrollEndDrag}
         onEndReached={onLoadMore}
         onEndReachedThreshold={5}
         onViewableItemsChanged={HandleViewableItemsChanged}
@@ -185,22 +360,33 @@ const Reader: ForwardRefRenderFunction<ReaderRef, ReaderProps> = (
   }
 
   return (
-    <Controller onTap={onTap} onLongPress={(position) => onLongPress && onLongPress(position)}>
-      <FlashList
-        ref={flashListRef}
-        data={data}
-        inverted={inverted}
-        estimatedItemSize={(windowHeight * 3) / 5}
-        estimatedListSize={{ width: windowWidth, height: windowHeight }}
-        onEndReached={onLoadMore}
-        onEndReachedThreshold={5}
-        onViewableItemsChanged={HandleViewableItemsChanged}
-        renderItem={renderVerticalItem}
-        keyExtractor={(item) => item.uri}
-        ListHeaderComponent={<Box height={0} safeAreaTop />}
-        ListFooterComponent={<Box height={0} safeAreaBottom />}
-      />
-    </Controller>
+    <FlashList
+      key="vertical"
+      ref={flashListRef}
+      data={data}
+      inverted={inverted}
+      extraData={{ inverted, onTap, onLongPress, onImageLoad }}
+      initialScrollIndex={initialScrollIndex}
+      estimatedItemSize={(windowHeight * 3) / 5}
+      estimatedListSize={{ width: windowWidth, height: windowHeight }}
+      onScroll={onScroll}
+      onScrollBeginDrag={onScrollBeginDrag}
+      onScrollEndDrag={onScrollEndDrag}
+      onEndReached={onLoadMore}
+      onEndReachedThreshold={5}
+      onViewableItemsChanged={HandleViewableItemsChanged}
+      renderItem={renderVerticalItem}
+      keyExtractor={(item) => item.uri}
+      ListHeaderComponent={<Box height={0} safeAreaTop />}
+      ListFooterComponent={<Box height={0} safeAreaBottom />}
+      overrideItemLayout={(layout, item) => {
+        const state = cache.getImageState(item.uri);
+        if (state) {
+          layout.size =
+            orientation === Orientation.Portrait ? state.portraitHeight : state.landscapeHeight;
+        }
+      }}
+    />
   );
 };
 

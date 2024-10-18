@@ -13,6 +13,7 @@ import {
 import {
   nonNullable,
   coverAspectRatio,
+  statusToLabel,
   Sequence,
   ChapterOptions,
   MangaStatus,
@@ -68,7 +69,7 @@ const ChapterSelectOptions: ActionsheetSelectProps['options'] = [
 
 const Detail = ({ route, navigation }: StackDetailProps) => {
   const { mangaHash, enabledMultiple = false, selected = [] } = route.params;
-  const { gap, insets, splitWidth, numColumns, windowWidth, windowHeight } = useSplitWidth({
+  const { gap, insets, itemWidth, numColumns, windowWidth, windowHeight } = useSplitWidth({
     gap: 12,
     minNumColumns: 3,
     maxSplitWidth: 100,
@@ -89,13 +90,13 @@ const Detail = ({ route, navigation }: StackDetailProps) => {
   const lastWatch = useMemo(() => lastWatchDict[mangaHash] || {}, [lastWatchDict, mangaHash]);
   const extraData = useMemo(
     () => ({
-      width: splitWidth,
+      width: itemWidth,
       dict: reocrdDict,
       chapterHash: lastWatch.chapter,
       multiple: enabledMultiple,
       checkList: selected,
     }),
-    [splitWidth, reocrdDict, lastWatch.chapter, enabledMultiple, selected]
+    [itemWidth, reocrdDict, lastWatch.chapter, enabledMultiple, selected]
   );
   const chapters = useMemo(() => {
     if (!data) {
@@ -156,19 +157,6 @@ const Detail = ({ route, navigation }: StackDetailProps) => {
       </Flex>
     );
   }
-
-  const StatusToLabel = (status: MangaStatus) => {
-    switch (status) {
-      case MangaStatus.Serial: {
-        return '连载中';
-      }
-      case MangaStatus.End: {
-        return '已完结';
-      }
-      default:
-        return '未知';
-    }
-  };
 
   const handleChapter = (chapterHash: string) => {
     if (favorites.find((item) => item.mangaHash === mangaHash)) {
@@ -243,7 +231,7 @@ const Detail = ({ route, navigation }: StackDetailProps) => {
               right={`${gap / 3}px`}
             />
           )}
-          {!multiple && record && record.progress > 0 && (
+          {!multiple && record && record.progress >= 0 && (
             <Icon
               as={MaterialIcons}
               size="xs"
@@ -311,7 +299,7 @@ const Detail = ({ route, navigation }: StackDetailProps) => {
             来源：{data.sourceName}
           </Text>
           <Text color="white" fontSize={14} fontWeight="bold" numberOfLines={1}>
-            状态：{StatusToLabel(data.status)}
+            状态：{statusToLabel(data.status)}
           </Text>
           <Text color="white" fontSize={14} fontWeight="bold" numberOfLines={1}>
             最近更新：{data.updateTime || '未知'}
@@ -329,7 +317,7 @@ const Detail = ({ route, navigation }: StackDetailProps) => {
             paddingRight: gap / 2 + insets.right,
           }}
           numColumns={numColumns}
-          estimatedItemSize={24}
+          estimatedItemSize={50}
           estimatedListSize={{ width: windowWidth, height: windowHeight }}
           refreshControl={
             <RefreshControl
@@ -442,7 +430,7 @@ export const HeartAndBrowser = () => {
             name={
               selected.length <= 0
                 ? 'checkbox-blank-outline'
-                : selected.length >= manga.chapters.length - 1
+                : selected.length >= manga.chapters.length
                 ? 'checkbox-marked-outline'
                 : 'checkbox-intermediate'
             }
@@ -525,29 +513,23 @@ export const PrehandleDrawer = () => {
           flex={1}
           fontWeight="bold"
           fontSize="md"
-          color={`purple.${Math.floor(progress * 4) + 5}00`}
+          color={`purple.${Math.floor(progress * -5) + 9}00`}
           numberOfLines={1}
         >
           {item.title}
         </Text>
         {item.status === AsyncStatus.Pending && (
           <Box ml={1}>
-            <SpinLoading size="sm" height={1} color={`purple.${Math.floor(progress * 4) + 5}00`} />
+            <SpinLoading size="sm" height={1} color={`purple.${Math.floor(progress * -5) + 9}00`} />
           </Box>
         )}
-        {item.status === AsyncStatus.Fulfilled && (
-          <Pressable px={1} _pressed={{ opacity: 0.5 }} onPress={() => handleRemove(item.taskId)}>
-            <Icon
-              as={MaterialIcons}
-              size="md"
-              fontWeight="semibold"
-              name="check"
-              color="purple.900"
-            />
-          </Pressable>
-        )}
         {item.status === AsyncStatus.Rejected && (
-          <Pressable px={1} _pressed={{ opacity: 0.5 }} onPress={() => handleRetry(item.taskId)}>
+          <Pressable
+            px={1}
+            _pressed={{ opacity: 0.5 }}
+            onPress={() => handleRetry(item.taskId)}
+            onLongPress={() => handleRemove(item.taskId)}
+          >
             <Text fontWeight="bold" fontSize="sm" color="red.800">
               {item.fail.length}
             </Text>
@@ -571,7 +553,6 @@ export const PrehandleDrawer = () => {
             estimatedItemSize={50}
             contentContainerStyle={{
               paddingTop: insets.top,
-              paddingLeft: insets.left,
               paddingRight: insets.right,
               paddingBottom: insets.bottom,
             }}

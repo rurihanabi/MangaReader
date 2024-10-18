@@ -1,19 +1,11 @@
 import queryString from 'query-string';
 
-export interface FetchData {
-  url: string;
-  method?: GET | POST;
-  body?: FormData | Record<string, any>;
-  headers?: Headers;
-  timeout?: number;
-}
-
 export const fetchData = ({
   url,
   method = 'GET',
   body = {},
   headers = new Headers(),
-  timeout = 15000,
+  timeout = 10000,
 }: FetchData) => {
   const controller = new AbortController();
   const init: RequestInit & { headers: Headers } = {
@@ -61,13 +53,14 @@ export const fetchData = ({
         .then((data) => {
           res({ error: undefined, data });
         })
-        .catch((error) => {
-          res({ error, data: undefined });
+        .catch(() => {
+          res({ error: new Error('网络错误，请稍后重试'), data: undefined });
         })
         .finally(() => {
           clearTimeout(delay);
         });
     } catch (error) {
+      clearTimeout(delay);
       res({ error: error as Error, data: undefined });
     }
   });

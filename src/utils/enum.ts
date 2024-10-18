@@ -24,12 +24,18 @@ export enum MangaStatus {
  * @enum {number}
  */
 export enum LayoutMode {
+  /** 翻页模式 */
   Horizontal = 'horizontal',
+  /** 条漫模式 */
   Vertical = 'vertical',
+  /** 双页模式 */
+  Multiple = 'multiple',
 }
 
 export enum ReaderDirection {
+  /** 从右向左 */
   Left = 'left',
+  /** 从左向右 */
   Right = 'right',
 }
 
@@ -41,15 +47,16 @@ export enum ErrorMessage {
   RequestTimeout = '请求超时~',
   NoSupport = '插件不支持',
   MissingChapterInfo = '缺少章节信息~',
-  SyncFail = '同步数据失败～',
   WrongResponse = '响应失败: ',
   WrongDataType = '错误的数据格式',
-  DDoSRetry = '网站DDoS保护，请再试一次',
-  CookieInvalid = 'Cookie失效，请重新获取',
+  DDoSRetry = 'KL漫画网站DDoS保护，请重试',
+  NotFoundDMZJ = '未找到漫画，请在Webview里登录获取UID后再试',
+  AuthFailPICA = '哔咔漫画Token失效，请在Webview里重新获取',
   WithoutPermission = '授权失败',
-  IOSNotSupportWebp = '暂不支持.webp格式下载',
-  TokenInvalid = 'Token失效，请重新获取',
   PushTaskFail = '推送任务失败',
+  CloudflareFail = 'cloudflare认证失败，请在Webview里重新校验',
+  AccessSourceFail = '访问资源失败',
+  ExecutionJobFail = '执行任务失败',
 }
 
 export enum Orientation {
@@ -70,7 +77,9 @@ export enum ChapterOptions {
 }
 
 export enum Sequence {
+  /** 从小到大 */
   Asc = 'Asc',
+  /** 从大到小 */
   Desc = 'Desc',
 }
 
@@ -80,10 +89,13 @@ export enum Volume {
 }
 
 export enum LightSwitch {
+  /** 关灯 */
   Off = 'Off',
+  /** 开灯 */
   On = 'On',
 }
 
+/** 任务类型 */
 export enum TaskType {
   Download,
   Export,
@@ -111,4 +123,53 @@ export enum PositionXY {
   BottomLeft,
   BottomMid,
   BottomRight,
+}
+
+/** 图片加密类型 */
+export enum ScrambleType {
+  JMC,
+  RM5,
+}
+
+export enum MultipleSeat {
+  /** 第一张 | 第二张 */
+  AToB,
+  /** 第二张 | 第一张 */
+  BToA,
+}
+
+export enum Hearing {
+  Enable,
+  Disabled,
+}
+
+export enum Timer {
+  Enable,
+  Disabled,
+}
+
+export enum SafeArea {
+  All,
+  None,
+  X,
+  Y,
+}
+
+export enum TemplateKey {
+  MANGA_ID = 'MANGA_ID',
+  MANGA_NAME = 'MANGA_NAME',
+  CHAPTER_ID = 'CHAPTER_ID',
+  CHAPTER_NAME = 'CHAPTER_NAME',
+  AUTHOR = 'AUTHOR',
+  SOURCE_ID = 'SOURCE_ID',
+  SOURCE_NAME = 'SOURCE_NAME',
+  TAG = 'TAG',
+  STATUS = 'STATUS',
+  HASH = 'HASH',
+  TIME = 'TIME',
+}
+
+export enum Animated {
+  Enable,
+  Disabled,
 }

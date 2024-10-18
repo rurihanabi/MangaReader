@@ -1,4 +1,4 @@
-import { FetchData } from '~/utils';
+import { clearAllCookie, ErrorMessage } from '~/utils';
 
 interface InitialData {
   id: Plugin;
@@ -35,6 +35,10 @@ export enum Plugin {
   KL = 'KL',
   NH = 'NH',
   PICA = 'PICA',
+  MBZ = 'MBZ',
+  BZM = 'BZM',
+  RM5 = 'RM5',
+  HAPPY = 'HAPPY',
 }
 
 export enum Options {
@@ -117,7 +121,7 @@ abstract class Base {
       score,
       option = { discovery: [], search: [] },
       disabled = false,
-      batchDelay = 3000,
+      batchDelay = 1500,
       injectedJavaScript,
     } = init;
     this.id = id;
@@ -168,7 +172,7 @@ abstract class Base {
    * @memberof Base
    */
   static splitHash(hash: string): [Plugin, string, string] {
-    const [plugin, mangaId, chapterId] = hash.split('&');
+    const [plugin, mangaId = '', chapterId = ''] = hash.split('&');
     return [plugin as Plugin, mangaId, chapterId];
   }
 
@@ -184,7 +188,28 @@ abstract class Base {
     return plugin === this.id;
   }
 
+  /**
+   * @description default and useless function, just for types
+   * @public
+   * @param {Record<string, any>} _data
+   * @memberof Base
+   */
   public syncExtraData(_data: Record<string, any>) {}
+
+  /**
+   * @description check response is hit by cloudflare protect
+   * @public
+   * @param {cheerio.Root} $
+   * @memberof Base
+   */
+  public checkCloudFlare = ($: cheerio.Root, cfTitle?: string) => {
+    const title = $('title').first().text().trim();
+
+    if (title === 'Just a moment...' || (typeof cfTitle === 'string' && title === cfTitle)) {
+      clearAllCookie(this.href);
+      throw new Error(`${ErrorMessage.CloudflareFail} - ${this.name}`);
+    }
+  };
 
   /**
    * @description accept page param, return body for discovery fetch
@@ -238,7 +263,12 @@ abstract class Base {
    * @return {*}  {FetchData}
    * @memberof Base
    */
-  abstract prepareChapterFetch(mangaId: string, chapterId: string, page: number): FetchData;
+  abstract prepareChapterFetch(
+    mangaId: string,
+    chapterId: string,
+    page: number,
+    extra: Record<string, any>
+  ): FetchData;
 
   /**
    * @description crawl data from website or interface
@@ -285,8 +315,13 @@ abstract class Base {
     response: any,
     mangaId: string
   ):
-    | { error: Error; chapterList?: undefined; canLoadMore?: boolean }
-    | { error?: undefined; chapterList: Manga['chapters']; canLoadMore: boolean };
+    | { error: Error; chapterList?: undefined; canLoadMore?: boolean; nextPage?: number }
+    | {
+        error?: undefined;
+        chapterList: Manga['chapters'];
+        canLoadMore: boolean;
+        nextPage?: number;
+      };
 
   /**
    * @description crawl data from website or interface
@@ -301,8 +336,20 @@ abstract class Base {
     chapterId: string,
     page: number
   ):
-    | { error: Error; chapter?: undefined; canLoadMore?: boolean }
-    | { error?: undefined; chapter: Chapter; canLoadMore: boolean };
+    | {
+        error: Error;
+        chapter?: undefined;
+        canLoadMore?: boolean;
+        nextPage?: number;
+        nextExtra?: Record<string, any>;
+      }
+    | {
+        error?: undefined;
+        chapter: PartialOption<Chapter, 'title'>;
+        canLoadMore: boolean;
+        nextPage?: number;
+        nextExtra?: Record<string, any>;
+      };
 }
 
 export default Base;

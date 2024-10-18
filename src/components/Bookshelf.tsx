@@ -1,6 +1,6 @@
 import React, { memo, useMemo } from 'react';
 import { useDelayRender, useSplitWidth } from '~/hooks';
-import { Box, Text, Icon, Pressable } from 'native-base';
+import { Box, Text, Icon, HStack, Pressable } from 'native-base';
 import { Keyboard, StyleSheet } from 'react-native';
 import { coverAspectRatio } from '~/utils';
 import { CachedImage } from '@georstat/react-native-image-cache';
@@ -10,9 +10,11 @@ import WhiteCurtain from '~/components/WhiteCurtain';
 import SpinLoading from '~/components/SpinLoading';
 import Loading from '~/components/Loading';
 import Empty from '~/components/Empty';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 
 interface BookshelfProps {
   list: Manga[];
+  failList?: string[];
   trendList?: string[];
   activeList?: string[];
   negativeList?: string[];
@@ -21,10 +23,14 @@ interface BookshelfProps {
   itemOnPress: (hash: string) => void;
   loading?: boolean;
   emptyText?: string;
+  itemOnLongPress?: (hash: string) => void;
+  selectedList?: string[];
+  isSelectMode?: boolean;
 }
 
 const Bookshelf = ({
   list,
+  failList,
   trendList,
   activeList,
   negativeList,
@@ -33,8 +39,11 @@ const Bookshelf = ({
   itemOnPress,
   loading = false,
   emptyText,
+  selectedList,
+  isSelectMode,
+  itemOnLongPress,
 }: BookshelfProps) => {
-  const { gap, insets, splitWidth, numColumns, windowWidth, windowHeight } = useSplitWidth({
+  const { gap, insets, itemWidth, numColumns, windowWidth, windowHeight } = useSplitWidth({
     gap: 8,
     minNumColumns: 3,
     maxSplitWidth: 180,
@@ -42,12 +51,15 @@ const Bookshelf = ({
   const render = useDelayRender(loading && list.length === 0);
   const extraData = useMemo(
     () => ({
-      width: splitWidth,
+      width: itemWidth,
+      fail: failList || [],
       trend: trendList || [],
       active: activeList || [],
       negative: negativeList || [],
+      selectMode: isSelectMode || false,
+      selected: selectedList || [],
     }),
-    [splitWidth, activeList, trendList, negativeList]
+    [itemWidth, failList, trendList, activeList, negativeList, isSelectMode, selectedList]
   );
 
   const handlePress = (hash: string) => {
@@ -57,6 +69,11 @@ const Bookshelf = ({
   };
   const handleEndReached = () => {
     !loading && loadMore && loadMore();
+  };
+  const handleLongPress = (hash: string) => {
+    return () => {
+      itemOnLongPress?.(hash);
+    };
   };
 
   if ((loading && list.length === 0) || !render) {
@@ -71,7 +88,7 @@ const Bookshelf = ({
       data={list}
       extraData={extraData}
       numColumns={numColumns}
-      estimatedItemSize={splitWidth / coverAspectRatio}
+      estimatedItemSize={itemWidth / coverAspectRatio}
       estimatedListSize={{ width: windowWidth, height: windowHeight }}
       contentContainerStyle={{
         padding: gap / 2,
@@ -83,10 +100,17 @@ const Bookshelf = ({
       onEndReachedThreshold={1}
       keyExtractor={(item) => item.hash}
       ListFooterComponent={
-        loading ? <SpinLoading height={24} safeAreaBottom /> : <Box height={0} safeAreaBottom />
+        loading ? <SpinLoading height={48} safeAreaBottom /> : <Box safeAreaBottom />
       }
-      renderItem={({ item, extraData: { width, active, trend, negative } }) => (
-        <Pressable _pressed={{ opacity: 0.8 }} onPress={handlePress(item.hash)}>
+      renderItem={({
+        item,
+        extraData: { width, fail, trend, active, negative, selected, selectMode },
+      }) => (
+        <Pressable
+          _pressed={{ opacity: 0.8 }}
+          onPress={handlePress(item.hash)}
+          onLongPress={handleLongPress(item.hash)}
+        >
           <Box width={width + gap} flexDirection="column" p={`${gap / 2}px`}>
             <Box position="relative" shadow={0} bg="white" borderRadius={6}>
               <CachedImage
@@ -95,6 +119,19 @@ const Bookshelf = ({
                 style={{ ...styles.img, height: width / coverAspectRatio }}
                 resizeMode="cover"
               />
+              {selectMode && (
+                <Box shadow={0} position="absolute" right={0} top={0} borderRadius={3}>
+                  <Icon
+                    as={MaterialCommunityIcons}
+                    size="md"
+                    name="check-circle"
+                    color={selected?.includes(item.hash) ? 'purple.500' : 'gray.400'}
+                    position="absolute"
+                    top={`${(gap / 3) * -1}px`}
+                    right={`${(gap / 3) * -1}px`}
+                  />
+                </Box>
+              )}
               {trend.includes(item.hash) && (
                 <Box
                   shadow={0}
@@ -111,18 +148,20 @@ const Bookshelf = ({
                   </Text>
                 </Box>
               )}
-              {negative.includes(item.hash) && (
-                <Icon
-                  shadow="icon"
-                  position="absolute"
-                  top={1}
-                  right={1}
-                  as={MaterialIcons}
-                  name="lock"
-                  size="sm"
-                  color="purple.700"
-                />
-              )}
+              <HStack position="absolute" top={1} right={1}>
+                {fail.includes(item.hash) && !selectMode && (
+                  <Icon
+                    shadow="icon"
+                    as={MaterialIcons}
+                    name="report"
+                    size="md"
+                    color="yellow.500"
+                  />
+                )}
+                {negative.includes(item.hash) && !selectMode && (
+                  <Icon shadow="icon" as={MaterialIcons} name="lock" size="md" color="purple.500" />
+                )}
+              </HStack>
               <WhiteCurtain actived={active.includes(item.hash)}>
                 <Box
                   position="absolute"

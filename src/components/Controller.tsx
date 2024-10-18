@@ -1,25 +1,43 @@
-import React, { ReactNode, useState, memo } from 'react';
+import React, { ReactNode, useState, memo, useCallback, useMemo } from 'react';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
   runOnJS,
 } from 'react-native-reanimated';
+import { useDebouncedSafeAreaInsets, useDebouncedSafeAreaFrame } from '~/hooks';
+import { emptyFn, PositionX, SafeArea } from '~/utils';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import { useWindowDimensions } from 'react-native';
-import { PositionX } from '~/utils';
+import { useFocusEffect } from '@react-navigation/native';
 
 const doubleTapScaleValue = 2;
 
 export interface ControllerProps {
   onTap?: (position: PositionX) => void;
   onLongPress?: (position: PositionX) => void;
+  onZoomStart?: (scale: number) => void;
+  onZoomEnd?: (scale: number) => void;
   children: ReactNode;
   horizontal?: boolean;
+  safeAreaType?: SafeArea;
 }
 
-const Controller = ({ onTap, children, horizontal = false, onLongPress }: ControllerProps) => {
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+export interface LongPressControllerProps {
+  onLongPress?: (position: PositionX) => void;
+  children: ReactNode;
+}
+
+const Controller = ({
+  children,
+  horizontal = false,
+  safeAreaType = SafeArea.None,
+  onTap,
+  onLongPress,
+  onZoomStart = emptyFn,
+  onZoomEnd = emptyFn,
+}: ControllerProps) => {
+  const insets = useDebouncedSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useDebouncedSafeAreaFrame();
   const [enabled, setEnabled] = useState(false);
   const oneThirdWidth = windowWidth / 3;
 
@@ -40,15 +58,44 @@ const Controller = ({ onTap, children, horizontal = false, onLongPress }: Contro
   const savedTranslationY = useSharedValue(0);
   const savedScale = useSharedValue(1);
 
+  const safeAreaStyle = useMemo(() => {
+    return {
+      [SafeArea.All]: {
+        paddingTop: insets.top,
+        paddingLeft: insets.left,
+        paddingRight: insets.right,
+        paddingBottom: insets.bottom,
+      },
+      [SafeArea.X]: {
+        paddingLeft: insets.left,
+        paddingRight: insets.right,
+      },
+      [SafeArea.Y]: {
+        paddingTop: insets.top,
+        paddingBottom: insets.bottom,
+      },
+      [SafeArea.None]: {},
+    }[safeAreaType];
+  }, [insets, safeAreaType]);
   const animatedStyle = useAnimatedStyle(() => ({
-    width: windowWidth,
-    height: windowHeight,
+    width: width.value,
+    height: horizontal ? height.value : 'auto',
     transform: [
       { translateX: translationX.value },
       { translateY: translationY.value },
       { scale: scale.value },
     ],
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...safeAreaStyle,
   }));
+
+  useFocusEffect(
+    useCallback(() => {
+      width.value = windowWidth;
+      height.value = windowHeight;
+    }, [width, height, windowWidth, windowHeight])
+  );
 
   const singleTap = Gesture.Tap()
     .runOnJS(true)
@@ -73,6 +120,7 @@ const Controller = ({ onTap, children, horizontal = false, onLongPress }: Contro
     .numberOfTaps(2)
     .onStart((e) => {
       'worklet';
+      runOnJS(onZoomStart)(scale.value);
       if (savedScale.value > 1) {
         scale.value = withTiming(1, { duration: 300 });
         translationX.value = withTiming(0, { duration: 300 });
@@ -100,6 +148,10 @@ const Controller = ({ onTap, children, horizontal = false, onLongPress }: Contro
         savedTranslationY.value = currentY;
         runOnJS(setEnabled)(doubleTapScaleValue > 1);
       }
+    })
+    .onEnd(() => {
+      'worklet';
+      runOnJS(onZoomEnd)(scale.value > 1 ? 1 : doubleTapScaleValue);
     });
   const longPress = Gesture.LongPress()
     .runOnJS(true)
@@ -120,6 +172,7 @@ const Controller = ({ onTap, children, horizontal = false, onLongPress }: Contro
       'worklet';
       focalX.value = e.focalX;
       focalY.value = e.focalY;
+      runOnJS(onZoomStart)(scale.value);
     })
     .onChange((e) => {
       'worklet';
@@ -153,6 +206,7 @@ const Controller = ({ onTap, children, horizontal = false, onLongPress }: Contro
       savedTranslationX.value = translationX.value;
       savedTranslationY.value = translationY.value;
       runOnJS(setEnabled)(scale.value > 1);
+      runOnJS(onZoomEnd)(scale.value);
     });
   const panGesture = Gesture.Pan()
     .minPointers(1)
@@ -189,7 +243,13 @@ const Controller = ({ onTap, children, horizontal = false, onLongPress }: Contro
     });
 
   return (
-    <GestureDetector gesture={Gesture.Exclusive(doubleTap, singleTap, longPress)}>
+    <GestureDetector
+      gesture={
+        onLongPress
+          ? Gesture.Exclusive(doubleTap, singleTap, longPress)
+          : Gesture.Exclusive(doubleTap, singleTap)
+      }
+    >
       <GestureDetector gesture={pinchGesture}>
         <GestureDetector gesture={panGesture}>
           <Animated.View style={animatedStyle}>{children}</Animated.View>
@@ -197,6 +257,29 @@ const Controller = ({ onTap, children, horizontal = false, onLongPress }: Contro
       </GestureDetector>
     </GestureDetector>
   );
+};
+
+export const LongPressController = ({ children, onLongPress }: LongPressControllerProps) => {
+  const { width: windowWidth } = useDebouncedSafeAreaFrame();
+  const oneThirdWidth = windowWidth / 3;
+
+  const longPress = Gesture.LongPress()
+    .enabled(onLongPress !== undefined)
+    .runOnJS(true)
+    .minDuration(1000)
+    .onStart((e) => {
+      if (onLongPress) {
+        if (e.x < oneThirdWidth) {
+          onLongPress(PositionX.Left);
+        } else if (e.x < oneThirdWidth * 2) {
+          onLongPress(PositionX.Mid);
+        } else {
+          onLongPress(PositionX.Right);
+        }
+      }
+    });
+
+  return <GestureDetector gesture={longPress}>{children}</GestureDetector>;
 };
 
 export default memo(Controller);

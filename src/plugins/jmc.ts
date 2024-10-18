@@ -1,5 +1,6 @@
 import Base, { Plugin, Options } from './base';
-import { MangaStatus, ErrorMessage } from '~/utils';
+import { MangaStatus, ErrorMessage, ScrambleType } from '~/utils';
+import { Platform } from 'react-native';
 import * as cheerio from 'cheerio';
 
 const discoveryOptions = [
@@ -60,23 +61,23 @@ const PATTERN_HTTP_URL = /(https?:\/\/[^\s/$.?#].[^\s]*)/;
 class CopyManga extends Base {
   constructor() {
     const userAgent =
-      'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1';
+      Platform.OS === 'android'
+        ? 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Mobile Safari/537.36'
+        : 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
     super({
       score: 5,
       id: Plugin.JMC,
-      name: 'jmcomic',
+      name: '禁漫天堂',
       shortName: 'JMC',
-      description: '禁漫天堂：主打韩漫、本子类，需要代理',
+      description: '需要代理，屏蔽日本ip',
       href: 'https://18comic.vip',
       userAgent,
-      defaultHeaders: {
-        'User-Agent': userAgent,
-        Host: '18comic.vip',
-        Referer: 'https://18comic.vip',
-      },
+      defaultHeaders: { 'User-Agent': userAgent, Referer: 'https://18comic.vip' },
       option: { discovery: discoveryOptions, search: searchOptions },
     });
   }
+
+  private cfTitle = '403 Forbidden';
 
   prepareDiscoveryFetch: Base['prepareDiscoveryFetch'] = (page, { type, sort }) => {
     return {
@@ -118,6 +119,8 @@ class CopyManga extends Base {
   handleDiscovery: Base['handleDiscovery'] = (text: string | null) => {
     const $ = cheerio.load(text || '');
     const list: IncreaseManga[] = [];
+
+    this.checkCloudFlare($, this.cfTitle);
 
     $('div.row div.list-col')
       .has('div.thumb-overlay-albums')
@@ -170,6 +173,8 @@ class CopyManga extends Base {
     const $ = cheerio.load(text || '');
     const list: IncreaseManga[] = [];
 
+    this.checkCloudFlare($, this.cfTitle);
+
     $('div.row div.list-col')
       .has('div.thumb-overlay')
       .toArray()
@@ -219,6 +224,8 @@ class CopyManga extends Base {
 
   handleMangaInfo: Base['handleMangaInfo'] = (text: string | null) => {
     const $ = cheerio.load(text || '');
+
+    this.checkCloudFlare($, this.cfTitle);
 
     const [, mangaId] =
       ($('meta[property=og:url]').attr('content') || '').match(PATTERN_MANGA_ID) || [];
@@ -301,6 +308,8 @@ class CopyManga extends Base {
   handleChapter: Base['handleChapter'] = (text: string | null) => {
     const $ = cheerio.load(text || '');
 
+    this.checkCloudFlare($, this.cfTitle);
+
     const scriptContent =
       ($('script:not([src])').toArray() as cheerio.TagElement[]).filter(
         (script) =>
@@ -338,11 +347,12 @@ class CopyManga extends Base {
           ...this.defaultHeaders,
           referer: 'https://18comic.vip/',
           accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-          'accept-encoding': 'gzip, deflate, br',
+          'accept-encoding': 'gzip, deflate, br, zstd',
           'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
         },
         images: images.map((uri) => ({
           uri,
+          type: ScrambleType.JMC,
           needUnscramble: !uri.includes('.gif') && Number(chapterId) >= Number(scrambleId),
         })),
       },

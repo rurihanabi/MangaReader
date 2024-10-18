@@ -1,64 +1,99 @@
-import { EmitterSubscription } from 'react-native';
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import { AppStateStatus, Platform } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { VolumeManager } from 'react-native-volume-manager';
+import { useAppState } from './useAppState';
 import { Volume } from '~/utils';
 
-export const useVolumeUpDown = (callback: (type: Volume) => void) => {
+export const useVolumeUpDown = (callback: (type: Volume) => void, enable = true) => {
   const volumeRef = useRef<number>();
-  const initVolumeRef = useRef<number>(0.5);
+  const audioSessionIsInactiveRef = useRef<boolean>(false);
+  const [initVolume, setInitVolume] = useState<number>();
 
-  useFocusEffect(
-    useCallback(() => {
-      let volumeListener: EmitterSubscription | undefined;
-      let timeout: NodeJS.Timeout | undefined;
+  const init = useCallback(() => {
+    if (!enable) {
+      return;
+    }
 
-      VolumeManager.showNativeVolumeUI({ enabled: false });
-      VolumeManager.getVolume().then((volume) => {
-        let prev = typeof volume === 'number' ? volume : volume.volume;
+    if (Platform.OS === 'ios') {
+      VolumeManager.enable(true);
+    }
 
-        volumeRef.current = prev;
-        if (prev < 0.3) {
-          prev = 0.3;
-        } else if (prev > 0.7) {
-          prev = 0.7;
-        }
-        initVolumeRef.current = prev;
+    VolumeManager.getVolume().then((volume) => {
+      let prev = typeof volume === 'number' ? volume : volume.volume;
 
-        VolumeManager.setVolume(prev).then(() => {
-          volumeListener = VolumeManager.addVolumeListener((result) => {
-            if (result.volume - prev > 0.0001) {
-              timeout && clearTimeout(timeout);
-              timeout = setTimeout(() => {
-                VolumeManager.setVolume(initVolumeRef.current).then(() => {
-                  prev = initVolumeRef.current;
-                  callback(Volume.Up);
-                });
-              }, 200);
-            } else if (prev - result.volume > 0.0001) {
-              timeout && clearTimeout(timeout);
-              timeout = setTimeout(() => {
-                VolumeManager.setVolume(initVolumeRef.current).then(() => {
-                  prev = initVolumeRef.current;
-                  callback(Volume.Down);
-                });
-              }, 200);
-            }
+      volumeRef.current = prev;
+      if (prev <= 0) {
+        prev = 0.025;
+      } else if (prev >= 1) {
+        prev = 0.975;
+      }
+      VolumeManager.setVolume(prev);
+      setInitVolume(prev);
+    });
+  }, [enable]);
+  const listener = useCallback(() => {
+    if (!enable || typeof initVolume !== 'number') {
+      return;
+    }
 
-            prev = result.volume;
-          });
+    VolumeManager.showNativeVolumeUI({ enabled: false });
+    const volumeListener = VolumeManager.addVolumeListener((result) => {
+      // On iOS, events could get swallowed if fired too rapidly.
+      // https://github.com/hirbod/react-native-volume-manager/issues/3
+      if (result.volume - initVolume > 0.0001) {
+        setTimeout(
+          () => VolumeManager.setVolume(initVolume).finally(() => callback(Volume.Up)),
+          200
+        );
+      } else if (initVolume - result.volume > 0.0001) {
+        setTimeout(
+          () => VolumeManager.setVolume(initVolume).finally(() => callback(Volume.Down)),
+          200
+        );
+      }
+    });
+
+    return () => {
+      volumeListener && volumeListener.remove();
+      if (typeof volumeRef.current === 'number') {
+        VolumeManager.setVolume(volumeRef.current).finally(() => {
+          VolumeManager.showNativeVolumeUI({ enabled: true });
         });
-      });
+      }
+    };
+  }, [enable, initVolume, callback]);
+  const reboot = useCallback(() => {
+    if (Platform.OS === 'ios') {
+      VolumeManager.enable(true);
+    }
+    if (initVolume !== undefined) {
+      VolumeManager.setVolume(initVolume);
+    }
+  }, [initVolume]);
+  const enabledAudioSession = useCallback(
+    (status: AppStateStatus) => {
+      if (!enable) {
+        return;
+      }
 
-      return () => {
-        timeout && clearTimeout(timeout);
-        volumeListener && volumeListener.remove();
-        if (typeof volumeRef.current === 'number') {
-          VolumeManager.setVolume(volumeRef.current).finally(() => {
-            VolumeManager.showNativeVolumeUI({ enabled: true });
-          });
+      if (Platform.OS === 'ios') {
+        if (status === 'active') {
+          if (audioSessionIsInactiveRef.current) {
+            VolumeManager.setActive(true);
+            audioSessionIsInactiveRef.current = false;
+            reboot();
+          }
+        } else {
+          VolumeManager.setActive(false);
+          audioSessionIsInactiveRef.current = true;
         }
-      };
-    }, [callback])
+      }
+    },
+    [enable, reboot]
   );
+
+  useFocusEffect(init);
+  useFocusEffect(listener);
+  useAppState(enabledAudioSession);
 };

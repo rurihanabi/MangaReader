@@ -5,6 +5,10 @@ import {
   LayoutMode,
   LightSwitch,
   ReaderDirection,
+  MultipleSeat,
+  Hearing,
+  Timer,
+  Animated,
 } from '~/utils';
 import { createSlice, combineReducers, PayloadAction } from '@reduxjs/toolkit';
 import { Plugin, defaultPlugin, defaultPluginList } from '~/plugins';
@@ -32,7 +36,12 @@ export const initialState: RootState = {
     light: LightSwitch.Off,
     direction: ReaderDirection.Right,
     sequence: Sequence.Desc,
-    androidDownloadPath: Dirs.SDCardDir + '/DCIM',
+    seat: MultipleSeat.AToB,
+    hearing: Hearing.Enable,
+    timer: Timer.Disabled,
+    animated: Animated.Enable,
+    timerGap: 5000,
+    androidDownloadPath: Dirs.SDCardDir + '/DCIM/{{CHAPTER_NAME}}',
   },
   plugin: {
     source: defaultPlugin,
@@ -72,7 +81,14 @@ export const initialState: RootState = {
     openDrawer: false,
     showDrawer: false,
   },
-  task: { list: [], job: { max: 5, list: [], thread: [] } },
+  task: {
+    list: [],
+    job: {
+      max: 5,
+      list: [],
+      thread: [],
+    },
+  },
   dict: {
     manga: {},
     chapter: {},
@@ -128,17 +144,17 @@ const datasyncSlice = createSlice({
       }
       state.syncStatus = AsyncStatus.Fulfilled;
     },
-    backupToClipboard(state) {
+    backup(state) {
       state.backupStatus = AsyncStatus.Pending;
     },
-    backupToClipboardCompletion(state, action: FetchResponseAction) {
+    backupCompletion(state, action: FetchResponseAction) {
       if (action.payload.error) {
-        state.syncStatus = AsyncStatus.Rejected;
+        state.backupStatus = AsyncStatus.Rejected;
         return;
       }
-      state.syncStatus = AsyncStatus.Fulfilled;
+      state.backupStatus = AsyncStatus.Fulfilled;
     },
-    restore(state, _action: PayloadAction<string>) {
+    restore(state) {
       state.restoreStatus = AsyncStatus.Pending;
     },
     restoreCompletion(state, action: FetchResponseAction) {
@@ -199,6 +215,21 @@ const settingSlice = createSlice({
     setSequence(state, action: PayloadAction<Sequence>) {
       state.sequence = action.payload;
     },
+    setSeat(state, action: PayloadAction<MultipleSeat>) {
+      state.seat = action.payload;
+    },
+    setHearing(state, action: PayloadAction<Hearing>) {
+      state.hearing = action.payload;
+    },
+    setTimer(state, action: PayloadAction<Timer>) {
+      state.timer = action.payload;
+    },
+    setTimerGap(state, action: PayloadAction<number>) {
+      state.timerGap = action.payload;
+    },
+    setAnimated(state, action: PayloadAction<Animated>) {
+      state.animated = action.payload;
+    },
     setAndroidDownloadPath(state, action: PayloadAction<string>) {
       state.androidDownloadPath = action.payload;
     },
@@ -229,6 +260,9 @@ const pluginSlice = createSlice({
       if (index !== -1) {
         state.list[index].disabled = !state.list[index].disabled;
       }
+    },
+    sortPlugin(state, action: PayloadAction<RootState['plugin']['list']>) {
+      state.list = action.payload;
     },
     syncPlugin(_state, action: PayloadAction<RootState['plugin']>) {
       return action.payload;
@@ -373,7 +407,10 @@ const favoritesSlice = createSlice({
       const { mangaHash, enableBatch = true } = action.payload;
       state.unshift({ mangaHash, isTrend: false, enableBatch });
     },
-    removeFavorites(state, action: PayloadAction<string>) {
+    removeFavorites(state, action: PayloadAction<string | string[]>) {
+      if (Array.isArray(action.payload)) {
+        return state.filter((item) => !action.payload.includes(item.mangaHash));
+      }
       return state.filter((item) => item.mangaHash !== action.payload);
     },
     enabledBatch(state, action: PayloadAction<string>) {
@@ -723,6 +760,12 @@ const dictSlice = createSlice({
           ...data,
         };
       })
+      .addCase(
+        chapterAction.loadChapter,
+        (state, action: PayloadAction<{ chapterHash: string }>) => {
+          delete state.chapter[action.payload.chapterHash];
+        }
+      )
       .addCase(chapterAction.loadChapterCompletion, (state, action) => {
         const { error, data } = action.payload;
         if (error) {

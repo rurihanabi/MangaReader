@@ -4,6 +4,30 @@ import queryString from 'query-string';
 import LZString from 'lz-string';
 import * as cheerio from 'cheerio';
 
+const hostnames = [
+  { h: 'i', w: 0.1 },
+  { h: 'eu', w: 5 },
+  { h: 'eu1', w: 5 },
+  { h: 'us', w: 1 },
+  { h: 'us1', w: 1 },
+  { h: 'us2', w: 1 },
+  { h: 'us3', w: 1 },
+];
+
+const randomHostname = (n = hostnames) => {
+  for (var i = [n[0].w], r, t = 1; t < n.length; t++) {
+    i[t] = n[t].w + i[t - 1];
+  }
+  for (r = Math.random() * i[i.length - 1], t = 0; t < i.length; t++) {
+    if (i[t] > r) {
+      break;
+    }
+  }
+  return n[t].h;
+};
+
+const hostname = randomHostname(hostnames);
+
 const discoveryOptions = [
   {
     name: 'type',
@@ -98,9 +122,9 @@ class ManHuaGuiMobile extends Base {
     super({
       score: 5,
       id: Plugin.MHGM,
-      name: 'manhuagui(mobile)',
+      name: '漫画柜mobile',
       shortName: 'MHGM',
-      description: '漫画柜移动版：需要代理，频繁访问会封IP',
+      description: '需要代理，频繁访问会封IP',
       href: 'https://m.manhuagui.com',
       userAgent,
       defaultHeaders: { 'User-Agent': userAgent },
@@ -160,11 +184,11 @@ class ManHuaGuiMobile extends Base {
       const cover = 'https:' + $$('div.thumb img').first().attr('data-src');
       const [authorLabel, tagLabel, latestLabel, updateTimeLabel] = $$('dl')
         .toArray()
-        .map((dl) => cheerio.load(dl)('dd').toArray()) as cheerio.TagElement[][];
-      const author = authorLabel.map((item) => item.children[0].data || '');
-      const tag = tagLabel.map((item) => item.children[0].data || '');
-      const latest = latestLabel[0].children[0].data || '';
-      const updateTime = updateTimeLabel[0].children[0].data || '';
+        .map((dl) => cheerio.load(dl)('dd').first().text().trim());
+      const author = authorLabel.split(',');
+      const tag = tagLabel.split(',');
+      const latest = latestLabel !== '' ? latestLabel : undefined;
+      const updateTime = PATTERN_FULL_TIME.test(updateTimeLabel) ? updateTimeLabel : undefined;
       const [, mangaId] = href.match(PATTERN_MANGA_ID) || [];
 
       let status = MangaStatus.Unknown;
@@ -190,8 +214,8 @@ class ManHuaGuiMobile extends Base {
         bookCover: cover,
         latest,
         updateTime,
-        author: author.map((item) => item.split(',')).flat(),
-        tag: tag.map((item) => item.split(',')).flat(),
+        author,
+        tag,
       });
     });
 
@@ -210,11 +234,11 @@ class ManHuaGuiMobile extends Base {
       const cover = 'https:' + $$('div.thumb img').first().attr('data-src');
       const [authorLabel, tagLabel, latestLabel, updateTimeLabel] = $$('dl')
         .toArray()
-        .map((dl) => cheerio.load(dl)('dd').toArray()) as cheerio.TagElement[][];
-      const author = authorLabel.map((item) => item.children[0].data || '');
-      const tag = tagLabel.map((item) => item.children[0].data || '');
-      const latest = latestLabel[0].children[0].data || '';
-      const updateTime = updateTimeLabel[0].children[0].data || '';
+        .map((dl) => cheerio.load(dl)('dd').first().text().trim());
+      const author = authorLabel.split(',');
+      const tag = tagLabel.split(',');
+      const latest = latestLabel !== '' ? latestLabel : undefined;
+      const updateTime = PATTERN_FULL_TIME.test(updateTimeLabel) ? updateTimeLabel : undefined;
       const [, mangaId] = href.match(PATTERN_MANGA_ID) || [];
 
       let status = MangaStatus.Unknown;
@@ -240,8 +264,8 @@ class ManHuaGuiMobile extends Base {
         bookCover: cover,
         latest,
         updateTime,
-        author: author.map((item) => item.split(',')).flat(),
-        tag: tag.map((item) => item.split(',')).flat(),
+        author,
+        tag,
       });
     });
 
@@ -375,7 +399,7 @@ class ManHuaGuiMobile extends Base {
         title: chapterTitle,
         headers: {
           ...this.defaultHeaders,
-          host: 'i.hamreus.com',
+          host: `${hostname}.hamreus.com`,
           referer: 'https://m.manhuagui.com/',
           accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
           'accept-encoding': 'gzip, deflate, br',
@@ -383,7 +407,7 @@ class ManHuaGuiMobile extends Base {
         },
         images: images.map((item: string) => ({
           uri: encodeURI(
-            decodeURI('https://i.hamreus.com' + item + '?' + queryString.stringify(sl))
+            decodeURI(`https://${hostname}.hamreus.com${item}?${queryString.stringify(sl)}`)
           ),
         })),
       },

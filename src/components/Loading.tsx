@@ -5,10 +5,10 @@ const readingGif = require('~/assets/reading.gif');
 
 const Loading = () => {
   return (
-    <Center w="full" h="full" pb={32}>
+    <Center w="full" h="full" safeAreaX safeAreaBottom>
       <Image
         w={32}
-        h={48}
+        h={32}
         resizeMode="contain"
         resizeMethod="resize"
         fadeDuration={0}

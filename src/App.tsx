@@ -8,9 +8,10 @@ import { store, useAppSelector } from '~/redux';
 import { NavigationContainer } from '@react-navigation/native';
 import { NativeBaseProvider } from 'native-base';
 import { useMessageToast } from '~/hooks';
-import { SearchAndAbout } from '~/views/Home';
+import { ErrorBoundary } from 'react-error-boundary';
 import { StyleSheet } from 'react-native';
 import { Provider } from 'react-redux';
+import ErrorFallback from '~/components/ErrorFallback';
 import RNBootSplash from 'react-native-bootsplash';
 import loadable from '@loadable/component';
 import Header from '~/components/Header';
@@ -49,27 +50,29 @@ const NavigationScreen = ({ ready = false }: NavigationScreenProps) => {
   useMessageToast();
 
   return (
-    <Navigator
-      initialRouteName="Home"
-      screenOptions={{ header: DefaultHeader, freezeOnBlur: true }}
-    >
-      <Screen name="Home" options={{ headerRight: SearchAndAbout }} component={Home} />
-      <Screen
-        name="Discovery"
-        options={{ title: '', headerLeft: SearchAndPlugin }}
-        component={Discovery}
-      />
-      <Screen name="Search" options={{ headerRight: PluginSelect }} component={Search} />
-      <Screen
-        name="Detail"
-        options={{ title: 'loading...', headerRight: HeartAndBrowser }}
-        component={Detail}
-      />
-      <Screen name="Chapter" options={{ headerShown: false }} component={Chapter} />
-      <Screen name="Plugin" component={Plugin} />
-      <Screen name="Webview" component={Webview} />
-      <Screen name="About" component={About} />
-    </Navigator>
+    <ErrorBoundary fallbackRender={ErrorFallback}>
+      <Navigator
+        initialRouteName="Home"
+        screenOptions={{ header: DefaultHeader, freezeOnBlur: true }}
+      >
+        <Screen name="Home" component={Home} />
+        <Screen
+          name="Discovery"
+          options={{ title: '', headerLeft: SearchAndPlugin }}
+          component={Discovery}
+        />
+        <Screen name="Search" options={{ headerRight: PluginSelect }} component={Search} />
+        <Screen
+          name="Detail"
+          options={{ title: 'loading...', headerRight: HeartAndBrowser }}
+          component={Detail}
+        />
+        <Screen name="Chapter" options={{ headerShown: false }} component={Chapter} />
+        <Screen name="Plugin" component={Plugin} />
+        <Screen name="Webview" component={Webview} />
+        <Screen name="About" component={About} />
+      </Navigator>
+    </ErrorBoundary>
   );
 };
 
@@ -90,4 +93,12 @@ const App = () => {
   );
 };
 
+/** for the json schema generate */
+/** https://github.com/YousefED/typescript-json-schema/issues/307 */
+export type RootStateType = RootState;
+export type DictStateType = RootState['dict'];
+export type TaskStateType = RootState['task'];
+export type PluginStateType = RootState['plugin'];
+export type SettingStateType = RootState['setting'];
+export type FavoritesStateType = RootState['favorites'];
 export default App;

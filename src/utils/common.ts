@@ -1,9 +1,14 @@
-import { defaultPlugin, defaultPluginList } from '~/plugins';
-import { ErrorMessage, LightSwitch } from './enum';
+import { ErrorMessage, MangaStatus, ScrambleType } from './enum';
+import { Draft, Draft07, JsonError, JsonSchema } from 'json-schema-library';
 import { delay, race, Effect } from 'redux-saga/effects';
-import { Dirs } from 'react-native-file-access';
+import { ImageState } from '~/components/ComicImage';
+import { Platform } from 'react-native';
+import { Buffer } from 'buffer';
+import CookieManager from '@react-native-cookies/cookies';
 import queryString from 'query-string';
 import CryptoJS from 'crypto-js';
+import base64 from 'base-64';
+import md5 from 'blueimp-md5';
 
 export const PATTERN_VERSION = /v?([0-9]+)\.([0-9]+)\.([0-9]+)/;
 export const PATTERN_PUBLISH_TIME = /([0-9]+)-([0-9]+)-([0-9]+)/;
@@ -13,7 +18,10 @@ export const storageKey = {
   dict: '@dict',
   plugin: '@plugin',
   setting: '@setting',
-  task: '@task',
+  mangaIndex: '@mangaIndex',
+  chapterIndex: '@chapterIndex',
+  taskIndex: '@taskIndex',
+  jobIndex: '@jobIndex',
 };
 
 export function aspectFill(
@@ -67,101 +75,37 @@ export function haveError(payload: any): payload is { error: Error } {
   return payload && payload.error instanceof Error;
 }
 
-export function fixDictShape(dict: RootState['dict']): RootState['dict'] {
-  const mangaDict = dict.manga;
-  for (let key in mangaDict) {
-    const manga = mangaDict[key];
-    if (!manga) {
-      continue;
-    }
+export function validate<T = any>(
+  data: T,
+  schema?: JsonSchema,
+  initData?: Record<string, any>
+): data is T {
+  const jsonSchema: Draft = new Draft07(schema);
+  const errors: JsonError[] = jsonSchema.validate(data);
 
-    if (!Array.isArray(manga.author)) {
-      manga.author = [];
-    }
-    if (!Array.isArray(manga.tag)) {
-      manga.tag = [];
-    }
-  }
+  if (nonNullable(initData) && errors.length > 0) {
+    errors.forEach((error) => {
+      if (error.code !== 'required-property-error') {
+        return;
+      }
 
-  if (!nonNullable(dict.record)) {
-    dict.record = {};
-  }
-  if (!nonNullable(dict.lastWatch)) {
-    dict.lastWatch = {};
-  }
+      let initDataRef = initData;
+      const { value, key, pointer } = error.data as Record<string, any>;
+      const keys: string[] = pointer.split('/').slice(1);
 
-  return dict;
-}
+      keys.forEach(
+        (jsonKey) => (initDataRef = nonNullable(initDataRef) ? initDataRef[jsonKey] : undefined)
+      );
+      value[key] = nonNullable(initDataRef) ? initDataRef[key] : undefined;
+    });
 
-export function fixSettingShape(setting: RootState['setting']): RootState['setting'] {
-  if (!nonNullable(setting.light)) {
-    setting.light = LightSwitch.Off;
-  }
-  if (!nonNullable(setting.androidDownloadPath)) {
-    setting.androidDownloadPath = Dirs.SDCardDir + '/DCIM';
+    return validate(data, schema);
   }
 
-  return setting;
-}
-
-export function fixPluginShape(plugin: RootState['plugin']): RootState['plugin'] {
-  if (!nonNullable(plugin.source)) {
-    plugin.source = defaultPlugin;
+  if (errors.length > 0) {
+    return false;
   }
-  if (!Array.isArray(plugin.list)) {
-    plugin.list = defaultPluginList;
-  }
-  if (!nonNullable(plugin.extra)) {
-    plugin.extra = {};
-  }
-
-  return plugin;
-}
-
-export function fixTaskShape(task: RootState['task']): RootState['task'] {
-  if (!Array.isArray(task.list)) {
-    task.list = [];
-  }
-  if (nonNullable(task.job)) {
-    task.job = { list: [], max: 5, thread: [] };
-  }
-  if (!Array.isArray(task.job.list)) {
-    task.job.list = [];
-  }
-  if (!Array.isArray(task.job.thread)) {
-    task.job.thread = [];
-  }
-  if (typeof task.job.max !== 'number') {
-    task.job.max = 5;
-  }
-
-  return task;
-}
-
-export function fixRestoreShape(data: BackupData): BackupData {
-  if (!nonNullable || typeof data !== 'object') {
-    data = { createTime: 0, favorites: [], lastWatch: {} };
-  }
-  if (typeof data.createTime !== 'number') {
-    data.createTime = 0;
-  }
-  if (!Array.isArray(data.favorites)) {
-    data.favorites = [];
-  }
-  data.favorites = data.favorites.filter((item: any) => typeof item === 'string');
-  if (typeof data.lastWatch !== 'object') {
-    data.lastWatch = {};
-  }
-  for (let key in data.lastWatch) {
-    const item = data.lastWatch[key];
-    data.lastWatch[key] = {
-      page: item && typeof item.page === 'number' ? item.page : undefined,
-      chapter: item && typeof item.chapter === 'string' ? item.chapter : undefined,
-      title: item && typeof item.title === 'string' ? item.title : undefined,
-    };
-  }
-
-  return data;
+  return true;
 }
 
 export function getLatestRelease(
@@ -249,12 +193,14 @@ export function nonNullable<T>(v: T | null | undefined): v is T {
   return v !== null && v !== undefined;
 }
 
-export function trycatch<T extends (...args: any) => any>(fn: T): ReturnType<T> {
+export function trycatch<T extends (...args: any) => any>(fn: T, prefix?: string): ReturnType<T> {
   try {
     return fn();
   } catch (error) {
     if (error instanceof Error) {
-      return { error } as ReturnType<T>;
+      return {
+        error: new Error(prefix ? `${prefix}${error.message}` : error.message),
+      } as ReturnType<T>;
     } else {
       return { error: new Error(ErrorMessage.Unknown) } as ReturnType<T>;
     }
@@ -263,4 +209,234 @@ export function trycatch<T extends (...args: any) => any>(fn: T): ReturnType<T> 
 
 export function ellipsis(str: string, len: number = 20, suffix = '...') {
   return str.length > len ? str.substring(0, len) + suffix : str;
+}
+
+export function clearAllCookie(url: string) {
+  return new Promise<boolean>((res, rej) => {
+    if (typeof url !== 'string') {
+      rej(new Error('param url not a string type'));
+      return;
+    }
+
+    if (Platform.OS === 'android') {
+      CookieManager.removeSessionCookies().then(res).catch(rej);
+    } else if (Platform.OS === 'ios') {
+      CookieManager.get(url, true).then((cookies) => {
+        Promise.all(Object.keys(cookies).map((key) => CookieManager.clearByName(url, key, true)))
+          .then(() => res(true))
+          .catch(() => res(false));
+      });
+    }
+  });
+}
+
+export function getByteSize(str = '', unit: 'B' | 'KB' | 'MB' | 'GB' | 'TB' = 'MB') {
+  const size = new Blob([str]).size;
+  switch (unit) {
+    case 'TB': {
+      return (size / 1024 / 1024 / 1024 / 1024).toFixed(2) + unit;
+    }
+    case 'GB': {
+      return (size / 1024 / 1024 / 1024).toFixed(2) + unit;
+    }
+    case 'MB': {
+      return (size / 1024 / 1024).toFixed(2) + unit;
+    }
+    case 'KB': {
+      return (size / 1024).toFixed(2) + unit;
+    }
+    case 'B':
+      return size.toFixed(2) + unit;
+  }
+}
+
+export function dictToPairs(obj: Record<string, any>): [string, string][] {
+  return Object.keys(obj).map((key) => [key, JSON.stringify(obj[key])]);
+}
+
+export function pairsToDict(list: KeyValuePair[]) {
+  return list.reduce<Record<string, any>>((dict, [key, value]) => {
+    dict[key] = nonNullable(value) && value !== '' ? JSON.parse(value) : undefined;
+    return dict;
+  }, {});
+}
+
+function getChapterId(uri: string) {
+  const [, id] = uri.match(/\/([0-9]+)\//) || [];
+  return Number(id);
+}
+function getPicIndex(uri: string) {
+  const [, index] = uri.match(/\/([0-9]+)\./) || [];
+  return index;
+}
+function getSplitNum(id: number, index: string) {
+  var a = 10;
+  if (id >= 268850) {
+    const str = md5(id + index);
+    const nub = str.substring(str.length - 1).charCodeAt(0) % (id >= 421926 ? 8 : 10);
+
+    switch (nub) {
+      case 0:
+        a = 2;
+        break;
+      case 1:
+        a = 4;
+        break;
+      case 2:
+        a = 6;
+        break;
+      case 3:
+        a = 8;
+        break;
+      case 4:
+        a = 10;
+        break;
+      case 5:
+        a = 12;
+        break;
+      case 6:
+        a = 14;
+        break;
+      case 7:
+        a = 16;
+        break;
+      case 8:
+        a = 18;
+        break;
+      case 9:
+        a = 20;
+    }
+  }
+  return a;
+}
+export function unscrambleJMC(uri: string, width: number, height: number) {
+  const step = [];
+  const id = getChapterId(uri);
+  const index = getPicIndex(uri);
+  const numSplit = getSplitNum(id, index);
+  const perheight = height % numSplit;
+
+  for (let i = 0; i < numSplit; i++) {
+    let sHeight = Math.floor(height / numSplit);
+    let dy = sHeight * i;
+    const sy = height - sHeight * (i + 1) - perheight;
+
+    if (i === 0) {
+      sHeight += perheight;
+    } else {
+      dy += perheight;
+    }
+
+    step.push({
+      sx: 0,
+      sy,
+      sWidth: width,
+      sHeight,
+      dx: 0,
+      dy,
+      dWidth: width,
+      dHeight: sHeight,
+    });
+  }
+
+  return step;
+}
+
+export function unscrambleRM5(uri: string, width: number, height: number) {
+  const step = [];
+  const list = uri.split('/');
+  const id = list[list.length - 1].replace('.jpg', '');
+
+  const buffer = Buffer.from(CryptoJS.MD5(base64.decode(id)).toString(), 'hex');
+  const nub = buffer[buffer.length - 1];
+  const numSplit = (nub % 10) + 5;
+  const perheight = height % numSplit;
+
+  for (let i = 0; i < numSplit; i++) {
+    let sHeight = Math.floor(height / numSplit);
+    let dy = sHeight * i;
+    const sy = height - sHeight * (i + 1) - perheight;
+
+    if (i === 0) {
+      sHeight += perheight;
+    } else {
+      dy += perheight;
+    }
+
+    step.push({
+      sx: 0,
+      sy,
+      sWidth: width,
+      sHeight,
+      dx: 0,
+      dy,
+      dWidth: width,
+      dHeight: sHeight,
+    });
+  }
+
+  return step;
+}
+
+export function unscramble(uri: string, width: number, height: number, type = ScrambleType.JMC) {
+  switch (type) {
+    case ScrambleType.RM5: {
+      return unscrambleRM5(uri, width, height);
+    }
+    case ScrambleType.JMC:
+    default: {
+      return unscrambleJMC(uri, width, height);
+    }
+  }
+}
+
+export function emptyFn() {}
+
+export function statusToLabel(status: MangaStatus) {
+  switch (status) {
+    case MangaStatus.Serial: {
+      return '连载中';
+    }
+    case MangaStatus.End: {
+      return '已完结';
+    }
+    default:
+      return '未知';
+  }
+}
+
+export function getDefaultFillAverageHeight(
+  list: ImageState[],
+  defaultHeight: { landscape: number; portrait: number }
+) {
+  const height = list.reduce(
+    (prev, curr) => ({
+      landscapeHeight: prev.landscapeHeight + (curr.landscapeHeight || defaultHeight.landscape),
+      portraitHeight: prev.portraitHeight + (curr.portraitHeight || defaultHeight.portrait),
+    }),
+    { portraitHeight: 0, landscapeHeight: 0 }
+  );
+
+  return {
+    portrait: height.portraitHeight / list.length,
+    landscape: height.landscapeHeight / list.length,
+  };
+}
+
+export function getDefaultFillMedianHeight(
+  list: ImageState[],
+  defaultHeight: { landscape: number; portrait: number }
+) {
+  if (list.length <= 0) {
+    return {
+      portrait: defaultHeight.portrait,
+      landscape: defaultHeight.landscape,
+    };
+  }
+
+  const mid = Math.min(Math.max(Math.floor(list.length / 2), 0), list.length);
+  return {
+    portrait: list[mid]?.portraitHeight || defaultHeight.portrait,
+    landscape: list[mid]?.landscapeHeight || defaultHeight.landscape,
+  };
 }

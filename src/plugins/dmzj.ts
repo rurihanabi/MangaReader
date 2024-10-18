@@ -1,6 +1,6 @@
 import Base, { Plugin, Options } from './base';
 import { MangaStatus, ErrorMessage } from '~/utils';
-import moment from 'moment';
+import dayjs from 'dayjs';
 import * as cheerio from 'cheerio';
 
 interface DiscoveryItem {
@@ -37,6 +37,22 @@ interface SearchItem {
   last_updatetime: number;
   description: string;
   cover: string;
+}
+interface ChapterListReponse {
+  errno: number;
+  errmsg: string;
+  data: {
+    chapterInfo: {
+      chapter_id: number;
+      comic_id: number;
+      title: string;
+      chapter_order: number;
+      direction: number;
+      page_url: string[];
+      picnum: number;
+      page_url_hd: string[];
+    };
+  };
 }
 
 const discoveryOptions = [
@@ -102,26 +118,46 @@ const discoveryOptions = [
 const PATTERN_SEARCH_SCRIPT = /var serchArry=(.*)/;
 const PATTERN_INFO_SCRIPT = /initIntroData\((.*)\);/;
 const PATTERN_MANGAID_SCRIPT = /var obj_id = "(\d*)";/;
-const PATTERN_CHAPTER_SCRIPT = /mReader.initData\(({.*}),/;
-const PATTERN_MANGA_TITLE = /\/(.*)\//;
 const PATTERN_FULL_TIME = /[0-9]{4}-[0-9]{2}-[0-9]{2}/;
 
 class DongManZhiJia extends Base {
+  /**
+   * @description 用户UID，获取后可以解锁部分漫画
+   * @memberof DongManZhiJia
+   */
+  private uid = '';
+
   constructor() {
     const userAgent =
       'Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/604.1';
     super({
-      score: 4,
+      score: 3,
       id: Plugin.DMZJ,
-      name: 'dongmanzhijia',
+      name: '动漫之家mobile',
       shortName: 'DMZJ',
-      description: '动漫之家：访问速度快，但资源不如以前',
-      href: 'https://m.dmzj.com',
+      description: '需要登录账号',
+      href: 'https://m.idmzj.com',
       userAgent,
       defaultHeaders: { 'User-Agent': userAgent },
+      injectedJavaScript: `(function() {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ cookie: document.cookie }));
+      })();`,
       option: { discovery: discoveryOptions, search: [] },
     });
   }
+
+  syncExtraData = (data: Record<string, any>) => {
+    try {
+      const { cookie = '' } = data;
+      const [, my] = cookie.match(/my=([^;]+)/) || [];
+      const [, uid] = decodeURIComponent(my).match(/^(\d+)|/) || [];
+
+      if (uid) {
+        this.uid = uid;
+        return '获取uid成功: ' + uid;
+      }
+    } catch (e) {}
+  };
 
   prepareDiscoveryFetch: Base['prepareDiscoveryFetch'] = (page, { type, region, status, sort }) => {
     if (type === Options.Default) {
@@ -134,30 +170,39 @@ class DongManZhiJia extends Base {
       status = '0';
     }
     if (sort === Options.Default) {
-      sort = '0';
+      sort = '1';
     }
 
     return {
-      url: `https://m.dmzj.com/classify/${type}-0-${status}-${region}-${sort}-${page - 1}.json`,
+      url: `https://m.idmzj.com/classify/${type}-0-${status}-${region}-${sort}-${page - 1}.json`,
       headers: new Headers(this.defaultHeaders),
     };
   };
   prepareSearchFetch: Base['prepareSearchFetch'] = (keyword, _page) => {
     return {
-      url: `https://m.dmzj.com/search/${keyword}.html`,
+      url: `https://m.idmzj.com/search/${keyword}.html`,
       headers: new Headers(this.defaultHeaders),
     };
   };
   prepareMangaInfoFetch: Base['prepareMangaInfoFetch'] = (mangaId) => {
     return {
-      url: `https://m.dmzj.com/info/${mangaId}.html`,
+      url: `https://m.idmzj.com/info/${mangaId}.html`,
       headers: new Headers(this.defaultHeaders),
     };
   };
   prepareChapterListFetch: Base['prepareChapterListFetch'] = () => {};
   prepareChapterFetch: Base['prepareChapterFetch'] = (mangaId, chapterId) => {
     return {
-      url: `https://m.dmzj.com/view/${mangaId}/${chapterId}.html`,
+      url: 'https://www.idmzj.com/api/v1/comic1/chapter/detail',
+      body: {
+        channel: 'pc',
+        app_name: 'dmzj',
+        version: '1.0.0',
+        timestamp: dayjs().unix(),
+        uid: this.uid,
+        comic_id: mangaId,
+        chapter_id: chapterId,
+      },
       headers: new Headers(this.defaultHeaders),
     };
   };
@@ -167,7 +212,7 @@ class DongManZhiJia extends Base {
 
     return {
       discovery: list.map((item) => ({
-        href: `https://m.dmzj.com/info/${item.id}.html`,
+        href: `https://m.idmzj.com/info/${item.id}.html`,
         hash: Base.combineHash(this.id, String(item.id)),
         source: this.id,
         sourceName: this.name,
@@ -175,7 +220,7 @@ class DongManZhiJia extends Base {
         bookCover: `https://images.idmzj.com/${item.cover}`,
         title: item.name,
         latest: item.last_update_chapter_name,
-        updateTime: moment.unix(item.last_updatetime).format('YYYY-MM-DD'),
+        updateTime: dayjs.unix(item.last_updatetime).format('YYYY-MM-DD'),
         author: item.authors.split('/'),
         tag: item.types.split('/'),
         status:
@@ -201,7 +246,7 @@ class DongManZhiJia extends Base {
       (JSON.parse(stringifyData.replace(/[\n|\s]/g, '')) || []) as SearchItem[]
     ).map((item) => {
       return {
-        href: `https://m.dmzj.com/info/${item.id}.html`,
+        href: `https://m.idmzj.com/info/${item.id}.html`,
         hash: Base.combineHash(this.id, String(item.id)),
         source: this.id,
         sourceName: this.name,
@@ -215,7 +260,7 @@ class DongManZhiJia extends Base {
             : MangaStatus.Unknown,
         bookCover: `https://images.idmzj.com/${item.cover}`,
         latest: item.last_update_chapter_name,
-        updateTime: moment.unix(item.last_updatetime).format('YYYY-MM-DD'),
+        updateTime: dayjs.unix(item.last_updatetime).format('YYYY-MM-DD'),
         author: item.authors.split('/'),
         tag: item.types.split('/'),
       };
@@ -225,6 +270,10 @@ class DongManZhiJia extends Base {
   };
 
   handleMangaInfo: Base['handleMangaInfo'] = (text: string | null) => {
+    if (text?.includes('因版权、国家法规等原因，此漫画暂不提供观看，敬请谅解。')) {
+      throw new Error('因版权、国家法规等原因，此漫画暂不提供观看，敬请谅解。');
+    }
+
     const $ = cheerio.load(text || '');
     const manga: IncreaseManga = {
       href: '',
@@ -269,7 +318,7 @@ class DongManZhiJia extends Base {
       hash: Base.combineHash(this.id, String(item.comic_id), String(item.id)),
       mangaId: String(item.comic_id),
       chapterId: String(item.id),
-      href: `https://m.dmzj.com/view/${item.comic_id}/${item.id}.html`,
+      href: `https://m.idmzj.com/view/${item.comic_id}/${item.id}.html`,
       title: item.chapter_name,
     }));
 
@@ -310,7 +359,7 @@ class DongManZhiJia extends Base {
       manga.status = MangaStatus.End;
     }
 
-    manga.href = `https://m.dmzj.com/info/${mangaId}.html`;
+    manga.href = `https://m.idmzj.com/info/${mangaId}.html`;
     manga.mangaId = mangaId;
     manga.hash = Base.combineHash(this.id, mangaId);
     manga.title = title;
@@ -328,32 +377,30 @@ class DongManZhiJia extends Base {
     return { error: new Error(ErrorMessage.NoSupport + 'handleChapterList') };
   };
 
-  handleChapter: Base['handleChapter'] = (text: string | null) => {
-    const $ = cheerio.load(text || '');
-    const scriptContent =
-      ($('script:not([src])').toArray() as cheerio.TagElement[]).filter(
-        (item) =>
-          item.children.length > 0 && PATTERN_CHAPTER_SCRIPT.test(item.children[0].data || '')
-      )[0].children[0].data || '';
-    const [, stringifyData] = scriptContent.match(PATTERN_CHAPTER_SCRIPT) || [];
-
-    const data = JSON.parse(stringifyData);
-    const { id, comic_id, folder, chapter_name, page_url } = data;
-    const [, name] = (folder || '').match(PATTERN_MANGA_TITLE) || [];
+  handleChapter: Base['handleChapter'] = (
+    res: ChapterListReponse,
+    mangaId: string,
+    chapterId: string
+  ) => {
+    if (res.errno !== 0) {
+      return {
+        error: new Error(
+          res.errmsg === '漫画不存在' && this.uid === ''
+            ? ErrorMessage.NotFoundDMZJ
+            : ErrorMessage.WrongResponse + res.errmsg
+        ),
+      };
+    }
 
     return {
       canLoadMore: false,
       chapter: {
-        hash: Base.combineHash(this.id, comic_id, id),
-        mangaId: comic_id,
-        chapterId: id,
-        name,
-        title: chapter_name,
-        headers: {
-          ...this.defaultHeaders,
-          referer: 'https://m.dmzj.com/',
-        },
-        images: page_url.map((item: string) => ({ uri: encodeURI(item) })),
+        hash: Base.combineHash(this.id, mangaId, chapterId),
+        mangaId,
+        chapterId,
+        title: res.data.chapterInfo.title,
+        headers: { ...this.defaultHeaders, referer: 'https://idmzj.com/' },
+        images: res.data.chapterInfo.page_url.map((uri: string) => ({ uri })),
       },
     };
   };

@@ -5,6 +5,7 @@ import React, {
   ReactNode,
   ForwardRefRenderFunction,
   Fragment,
+  useMemo,
 } from 'react';
 import Animated, {
   useSharedValue,
@@ -13,34 +14,37 @@ import Animated, {
   withDelay,
   Easing,
 } from 'react-native-reanimated';
+import { useDebouncedSafeAreaFrame, useDebouncedSafeAreaInsets } from '~/hooks';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { useWindowDimensions } from 'react-native';
 
 export interface DrawerRef {
   open: () => void;
   close: () => void;
 }
 interface DrawerProps {
-  leakWidth?: number;
-  contentWidth?: number;
+  leak?: number;
+  content?: number;
   maskOpacity?: number;
   defaultDuration?: number;
   children?: ReactNode;
 }
 
 const Drawer: ForwardRefRenderFunction<DrawerRef, DrawerProps> = (
-  { leakWidth = 12, contentWidth = 300, maskOpacity = 0.5, defaultDuration = 300, children },
+  { leak = 12, content = 300, maskOpacity = 0.5, defaultDuration = 300, children },
   ref
 ) => {
-  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useDebouncedSafeAreaFrame();
+  const { right } = useDebouncedSafeAreaInsets();
+  const leakWidth = useMemo(() => leak + right, [leak, right]);
+  const contentWidth = useMemo(() => content + right, [content, right]);
   const minContentWidth = Math.min(windowWidth * 0.55, contentWidth);
   const translationX = useSharedValue(minContentWidth);
   const savedTranslationX = useSharedValue(minContentWidth);
 
   const opacity = useSharedValue(0.1);
   const savedOpacity = useSharedValue(0.1);
-  const backgroungColor = useSharedValue('transparent');
-  const savedBackgroungColor = useSharedValue('transparent');
+  const backgroundColor = useSharedValue('transparent');
+  const savedBackgroundColor = useSharedValue('transparent');
   const width = useSharedValue(leakWidth);
   const savedWidth = useSharedValue(leakWidth);
 
@@ -51,7 +55,7 @@ const Drawer: ForwardRefRenderFunction<DrawerRef, DrawerProps> = (
       opacity: opacity.value,
       width: width.value,
       height: windowHeight,
-      backgroundColor: backgroungColor.value,
+      backgroundColor: backgroundColor.value,
     };
   });
   const contentStyles = useAnimatedStyle(() => {
@@ -66,6 +70,15 @@ const Drawer: ForwardRefRenderFunction<DrawerRef, DrawerProps> = (
 
   useEffect(() => {
     if (translationX.value > 0) {
+      width.value = leakWidth;
+      savedWidth.value = leakWidth;
+    } else {
+      width.value = windowWidth;
+      savedWidth.value = windowWidth;
+    }
+  }, [leakWidth, windowWidth, translationX, width, savedWidth]);
+  useEffect(() => {
+    if (translationX.value > 0) {
       translationX.value = minContentWidth;
     }
     if (savedTranslationX.value > 0) {
@@ -77,8 +90,8 @@ const Drawer: ForwardRefRenderFunction<DrawerRef, DrawerProps> = (
     open: () => {
       width.value = windowWidth;
       savedWidth.value = windowWidth;
-      backgroungColor.value = 'black';
-      savedBackgroungColor.value = 'black';
+      backgroundColor.value = 'black';
+      savedBackgroundColor.value = 'black';
       opacity.value = withTiming(maskOpacity, { duration: defaultDuration, easing: Easing.linear });
       savedOpacity.value = maskOpacity;
       translationX.value = withTiming(0, { duration: defaultDuration, easing: Easing.linear });
@@ -87,11 +100,11 @@ const Drawer: ForwardRefRenderFunction<DrawerRef, DrawerProps> = (
     close: () => {
       width.value = withDelay(defaultDuration, withTiming(leakWidth, { duration: 0 }));
       savedWidth.value = leakWidth;
-      backgroungColor.value = withDelay(
+      backgroundColor.value = withDelay(
         defaultDuration,
         withTiming('transparent', { duration: 0 })
       );
-      savedBackgroungColor.value = 'transparent';
+      savedBackgroundColor.value = 'transparent';
       opacity.value = withTiming(0.1, { duration: defaultDuration, easing: Easing.linear });
       savedOpacity.value = 0.1;
       translationX.value = withTiming(minContentWidth, {
@@ -108,11 +121,11 @@ const Drawer: ForwardRefRenderFunction<DrawerRef, DrawerProps> = (
       if (e.absoluteX < windowWidth - minContentWidth) {
         width.value = withDelay(defaultDuration, withTiming(leakWidth, { duration: 0 }));
         savedWidth.value = leakWidth;
-        backgroungColor.value = withDelay(
+        backgroundColor.value = withDelay(
           defaultDuration,
           withTiming('transparent', { duration: 0 })
         );
-        savedBackgroungColor.value = 'transparent';
+        savedBackgroundColor.value = 'transparent';
         opacity.value = withTiming(0.1, { duration: defaultDuration, easing: Easing.linear });
         savedOpacity.value = 0.1;
         translationX.value = withTiming(minContentWidth, {
@@ -130,7 +143,7 @@ const Drawer: ForwardRefRenderFunction<DrawerRef, DrawerProps> = (
     .onChange((e) => {
       'worklet';
       const x = Math.min(Math.max(savedTranslationX.value + e.translationX, 0), minContentWidth);
-      backgroungColor.value = 'black';
+      backgroundColor.value = 'black';
       opacity.value = Math.min(Math.abs(1 - x / minContentWidth) * maskOpacity, maskOpacity);
       translationX.value = Math.min(
         Math.max(savedTranslationX.value + e.translationX, 0),
@@ -146,8 +159,8 @@ const Drawer: ForwardRefRenderFunction<DrawerRef, DrawerProps> = (
         if (translationX.value > savedTranslationX.value) {
           width.value = withDelay(duration, withTiming(leakWidth, { duration: 0 }));
           savedWidth.value = leakWidth;
-          backgroungColor.value = withDelay(duration, withTiming('transparent', { duration: 0 }));
-          savedBackgroungColor.value = 'transparent';
+          backgroundColor.value = withDelay(duration, withTiming('transparent', { duration: 0 }));
+          savedBackgroundColor.value = 'transparent';
           opacity.value = withTiming(0.1, { duration, easing: Easing.linear });
           savedOpacity.value = 0.1;
           translationX.value = withTiming(minContentWidth, { duration, easing: Easing.linear });
@@ -155,8 +168,8 @@ const Drawer: ForwardRefRenderFunction<DrawerRef, DrawerProps> = (
         } else {
           width.value = withDelay(duration, withTiming(windowWidth, { duration: 0 }));
           savedWidth.value = windowWidth;
-          backgroungColor.value = withDelay(duration, withTiming('black', { duration: 0 }));
-          savedBackgroungColor.value = 'black';
+          backgroundColor.value = withDelay(duration, withTiming('black', { duration: 0 }));
+          savedBackgroundColor.value = 'black';
           opacity.value = withTiming(maskOpacity, { duration, easing: Easing.linear });
           savedOpacity.value = maskOpacity;
           translationX.value = withTiming(0, { duration, easing: Easing.linear });
@@ -167,9 +180,9 @@ const Drawer: ForwardRefRenderFunction<DrawerRef, DrawerProps> = (
           defaultDuration - duration,
           withTiming(savedWidth.value, { duration: 0 })
         );
-        backgroungColor.value = withDelay(
+        backgroundColor.value = withDelay(
           duration,
-          withTiming(savedBackgroungColor.value, { duration: 0 })
+          withTiming(savedBackgroundColor.value, { duration: 0 })
         );
         opacity.value = withTiming(savedOpacity.value, {
           duration: defaultDuration - duration,
